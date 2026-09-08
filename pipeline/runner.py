@@ -189,6 +189,7 @@ def stage_artspec(slug: str, log: Log, **_: Any) -> Dict[str, Any]:
 def stage_art(slug: str, log: Log, **opts: Any) -> Dict[str, Any]:
     out = s6_art.run(slug, force=bool(opts.get("force")),
                      only=opts.get("only"), model=opts.get("model"),
+                     should_cancel=opts.get("should_cancel"),
                      on_log=lambda m: log(f"  {m}"))
     log(f"  모델 {out.get('model')} · 새로 만든 장면 {out['made'] or '없음'} · "
         f"그대로 둔 장면 {out['kept'] or '없음'}")
@@ -284,11 +285,15 @@ FUNCS: Dict[str, Callable[..., Dict[str, Any]]] = {
 
 
 def run_stage(slug: str, key: str, log: Log, **opts: Any) -> Dict[str, Any]:
+    """★ `should_cancel` 은 **받는 단계에만** 넘긴다. 모든 단계에 뿌리면 인자를
+    안 받는 단계가 통째로 죽는다 — 취소를 붙이려다 나머지를 깨뜨릴 자리다."""
     fn = FUNCS.get(key)
     if fn is None:
         raise KeyError(f"모르는 단계입니다: {key}")
     st = BY_KEY[key]
     log(f"[{st.name}] 시작")
+    if key != "art":
+        opts.pop("should_cancel", None)
     out = fn(slug, log, **opts)
     log(f"[{st.name}] 끝")
     return out

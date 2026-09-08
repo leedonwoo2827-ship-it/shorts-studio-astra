@@ -267,7 +267,10 @@ def create_app() -> FastAPI:
         st = stages.BY_KEY[key]
 
         def work(job) -> Any:
-            return runner.run_stage(slug, key, job.add_log, **opts)
+            # ★ 취소 깃발을 **단계까지** 넘긴다. 예전에는 깃발만 세우고 아무도 안 봐서
+            #   「중지」가 안 먹었다 — 장면 제작은 20분짜리라 못 멈추는 것이 치명적이다.
+            return runner.run_stage(slug, key, job.add_log,
+                                    should_cancel=job.canceled, **opts)
 
         try:
             job = REG.start(project_id=_pid(slug), stage=key,

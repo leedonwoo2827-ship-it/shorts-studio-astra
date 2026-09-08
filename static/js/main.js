@@ -14,6 +14,8 @@
 
 // ①~⑩. 화면 산출물의 진행 레일과 같은 글자를 쓴다.
 const CIRCLED = ["", "①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"];
+// 잡이 도는 동안 다시 그려도 되는 화면 — **글 쓰는 칸이 없는 곳만.**
+const REFRESH_WHILE_BUSY = new Set(["art", "compose", "build", "result"]);
 const NL = String.fromCharCode(10);   // 스크립트로 이 파일을 고칠 때
                                       // escape 가 벗겨지는 사고를 막는다
 const $ = (s) => document.querySelector(s);
@@ -131,15 +133,9 @@ function drawDock() {
   /* ★ 막대 하나로는 「도는지 멎었는지」를 못 읽는다. 장면 제작은 씬당 2분 30초라
    *   여덟 씬이면 20분인데, 그동안 화면이 아무 말도 안 하면 사람이 껐다 켠다.
    *   몇 개 중 몇 개인지와 **몇 분째인지**를 같이 적는다. */
-  const meter = [];
-  if (S.job.total > 0) meter.push(`${S.job.completed}/${S.job.total} · ${pct}%`);
-  const t0 = Date.parse(S.job.started_at || "");
-  if (!Number.isNaN(t0)) {
-    const end = S.job.finished_at ? Date.parse(S.job.finished_at) : Date.now();
-    const sec = Math.max(0, Math.round((end - t0) / 1000));
-    meter.push(`${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`);
-  }
-  $("#dock-meter").textContent = meter.join("  ·  ");
+  // 경과 시계는 `#dock-time` 이 이미 하고 있다 — 여기서는 **몇 개 중 몇 개**만 적는다.
+  $("#dock-meter").textContent = S.job.total > 0
+    ? `${S.job.completed}/${S.job.total} · ${pct}%` : "";
   $("#dock-stop").hidden = S.job.status !== "running";
 
   const log = $("#log");
@@ -165,11 +161,19 @@ function startPoll() {
   S.poll = setInterval(async () => {
     if (!S.job) return;
     try {
+      const before = S.job.completed;
       S.job = await api(`/api/jobs/${S.job.job_id}`);
       drawDock(); drawRail();
       if (S.job.status !== "running" && S.job.status !== "queued") {
         clearInterval(S.poll); S.poll = null;
         await loadProject(S.slug);       // 끝났으면 상태를 다시 읽는다
+      } else if (S.job.completed !== before && REFRESH_WHILE_BUSY.has(S.page)) {
+        /* ★ **한 개가 끝날 때마다 다시 그린다.** 예전에는 잡이 다 끝나야 화면을
+         *   갱신해서, 장면 제작 20분 동안 씬이 하나씩 채워지는 것이 안 보였다.
+         *   사람은 그때 「안 되는구나」 하고 껐다 켠다.
+         *   ★ 글 쓰는 칸이 있는 화면은 다시 그리지 않는다 — 저장 안 한 글이 날아간다.
+         *     그래서 읽기만 하는 화면만 이 목록에 든다. */
+        await loadProject(S.slug);
       }
     } catch (e) { clearInterval(S.poll); S.poll = null; }
   }, 900);

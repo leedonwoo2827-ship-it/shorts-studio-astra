@@ -111,6 +111,7 @@ def is_animated(name: str) -> bool:
 
 def run(slug: str, *, force: bool = False, only: Optional[List[int]] = None,
         model: Optional[str] = None,
+        should_cancel: Optional[Callable[[], bool]] = None,
         on_log: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
     sp = paths.art_spec(slug)
     if not sp.exists():
@@ -204,11 +205,26 @@ def run(slug: str, *, force: bool = False, only: Optional[List[int]] = None,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, encoding="utf-8", errors="replace",
     )
+    # ★ 로그를 읽는 이 자리가 **취소를 볼 수 있는 유일한 곳**이다. 브리지는 씬마다
+    #   한 줄씩 뱉으므로, 줄이 올 때마다 깃발을 보고 죽인다. 예전에는 깃발만 세우고
+    #   아무도 안 봐서 20분짜리를 못 멈췄다.
+    canceled = False
     for line in proc.stdout or []:
         line = line.rstrip()
         if line and on_log:
             on_log(line)
+        if should_cancel and should_cancel():
+            canceled = True
+            if on_log:
+                on_log("중지 요청 — 아스트라를 멈춥니다")
+            proc.kill()
+            break
     proc.wait()
+    if canceled:
+        # 여기까지 만든 장면은 파일로 남아 있다. 다음에 「장면 받기」를 누르면
+        # 그것들은 그대로 두고 나머지만 받는다.
+        return {"made": [], "kept": kept, "canceled": True,
+                "model": model or _model()}
 
     if not res_path.exists():
         raise RuntimeError(
