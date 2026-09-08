@@ -443,16 +443,12 @@ function sceneEditor(d, { showSource, showNarration, showVerify, showArt } = {})
 
     /* ③ 자막 = 음성이 읽는 글 · ④ 발음 = 규칙이 바꾼 글자 */
     const cap = el("div", "scell");
-    const hp = el("div", "hookpair");
-    [["hook_line1", s.hook_line1], ["hook_line2", s.hook_line2]].forEach(([k, v]) => {
-      const i = Object.assign(document.createElement("input"),
-        { type: "text", value: v || "", maxLength: 12, placeholder: "후크 12자" });
-      i.disabled = ro;
-      i.oninput = () => { (edits[s.no] = edits[s.no] || {})[k] = i.value; };
-      hp.appendChild(i);
-    });
-    cap.appendChild(hp);
-    cap.appendChild(field("srt_text", s.srt_text, 3));
+    /* ★ 씬별 후크 칸을 **없앴다.** 상단 후크는 영상 내내 바뀌지 않는다 — 씬마다
+     *   갈리면 보다 들어온 사람이 무슨 영상인지 모르고, 무드는 유형이 정하는데
+     *   씬마다 다른 후크를 손으로 넣으면 그 무드가 흩어진다.
+     *   값은 위쪽 「후크」 카드 한 곳에서 고치고 모든 씬이 그것을 따라간다.
+     *   칸이 둘이면 어느 쪽이 화면에 나가는지 사람이 알 수 없다. */
+    cap.appendChild(field("srt_text", s.srt_text, 4));
     if (showSource && s.source) cap.appendChild(el("div", "scene-src", s.source));
 
     const nar = showNarration ? el("div", "scell") : null;
@@ -867,7 +863,12 @@ PAGES.storyboard = async (m) => {
      ★ **하나로 통일했다.** 씬마다 후크 칸을 두면 어느 쪽이 화면에 나가는지
        사람이 알 수 없고, 씬마다 갈리면 보다 들어온 사람이 무슨 영상인지 모른다.
        여기서 고치면 모든 씬이 그것을 따라간다. */
-  const hf = d.hook_fixed || {};
+  /* ★ `hook_fixed` 가 비어 있으면 첫 씬의 후크를 끌어온다. 대본이 씬별 후크만 채우고
+   *   고정 후크를 안 준 판이 있어서, 그때 화면이 빈 칸으로 보이고 사람은 「후크가
+   *   없구나」 하고 지나간다 — 실제로는 씬에 들어 있다. */
+  const first = (d.scenes || [])[0] || {};
+  const hf = Object.assign({ line1: first.hook_line1 || "", line2: first.hook_line2 || "" },
+                           d.hook_fixed || {});
   const hc = card("후크",
     "화면 위 띠에 얹혀 영상 내내 바뀌지 않습니다. 한 줄 12자, 마침표 없이. "
     + "첫 줄은 상황을 세우고(잉크색), 둘째 줄이 뒤집습니다(주황).");
