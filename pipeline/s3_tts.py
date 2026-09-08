@@ -90,16 +90,36 @@ def run(slug: str, *, force: bool = False,
         "voice": voice, "speed": speed,
         "total_step": int(config.get("narration.total_step", 8)),
     }
+    # ★ **없으면 edge 로 물러선다.** VoiceWright 는 이 레포 밖에 사는 남의 폴더다
+    #   (numpy·torch 가 든 제 venv 로 돌아야 한다). 레포만 옮긴 사람에게는 그 폴더가
+    #   없는데, 예전에는 그때 음성 단계가 통째로 죽었다 — 이 레포는 「다른 폴더에
+    #   의존하지 않는다」가 원칙이므로 **좋은 목소리는 있으면 쓰고 없으면 포기한다.**
+    #   조용히 바꾸지는 않는다. 소리가 달라지는 것은 사람이 알아야 한다.
+    fell_back = False
+    if engine == "voicewright":
+        vw = str(config.get("tts.voicewright_dir") or "").strip()
+        vw_py = str(config.get("tts.python") or "").strip()
+        why = ""
+        if not vw:
+            why = "tts.voicewright_dir 가 비어 있습니다"
+        elif not Path(vw).is_dir():
+            why = f"그 폴더가 없습니다: {vw}"
+        elif vw_py and not Path(vw_py).is_file():
+            why = f"그 파이썬이 없습니다: {vw_py}"
+        if why:
+            if on_log:
+                on_log(f"⚠ VoiceWright 를 쓸 수 없어 edge 로 굽습니다 — {why}")
+            engine = "edge"
+            # ★ 파이썬도 같이 되돌린다. `tts.python` 은 VoiceWright venv 를 가리키고
+            #   있는데, edge 스크립트를 그 파이썬으로 부르면 이번엔 edge_tts 가
+            #   없다고 죽는다 — 물러선 자리에서 또 넘어지는 꼴이다.
+            fell_back = True
+
     if engine == "voicewright":
         job["voicewright_dir"] = config.get("tts.voicewright_dir")
         job["assets_dir"] = config.get("tts.assets_dir")
         job["edge_voice"] = None
         script = ROOT / "scripts" / "tts_bridge.py"
-        if not job["voicewright_dir"]:
-            raise RuntimeError(
-                "tts.engine 이 voicewright 인데 tts.voicewright_dir 가 비어 있습니다. "
-                "config.local.json 에 경로를 적거나 engine 을 edge 로 두세요."
-            )
     else:
         job["edge_voice"] = _edge_voice(voice)
         script = ROOT / "scripts" / "tts_edge.py"
@@ -110,7 +130,8 @@ def run(slug: str, *, force: bool = False,
 
     timeout = float(config.get("tts.timeout_ms", 300000)) / 1000.0
     proc = subprocess.Popen(
-        [_engine_python(), str(script), str(job_path), str(res_path)],
+        [sys.executable if fell_back else _engine_python(),
+         str(script), str(job_path), str(res_path)],
         cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, encoding="utf-8", errors="replace",
     )
