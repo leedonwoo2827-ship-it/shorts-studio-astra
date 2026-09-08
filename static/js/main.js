@@ -12,6 +12,8 @@
  */
 "use strict";
 
+const NL = String.fromCharCode(10);   // 스크립트로 이 파일을 고칠 때
+                                      // escape 가 벗겨지는 사고를 막는다
 const $ = (s) => document.querySelector(s);
 const el = (t, c, x) => { const n = document.createElement(t); if (c) n.className = c; if (x !== undefined) n.textContent = x; return n; };
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -674,10 +676,22 @@ PAGES.plan = async (m) => {
     const pre = Object.assign(el("pre", "out"), { textContent: "불러오는 중…" });
     api(`/api/projects/${enc}/structure`).then((j) => {
       const facts = (j && j.facts) || [];
-      pre.textContent = facts.length
-        ? facts.map((f) => `${f.id}  ${f.claim || f.text || ""}`
-          + (f.evidence ? `\n      근거: ${f.evidence}` : "")).join("\n")
-        : "(아직 없음)\n\n사실이 하나도 없으면 대본이 근거 없이 씁니다 — 원고에 표가 있는지 보세요.";
+      if (!facts.length) {
+        pre.textContent = "(아직 없음)" + NL + NL
+          + "사실이 하나도 없으면 대본이 근거 없이 씁니다 — 원고에 표가 있는지 보세요.";
+        return;
+      }
+      /* ★ 사실 한 줄에 **값과 근거를 같이** 보인다. 예전에는 `f.claim` 을 읽었는데
+       *   구조 파서가 내는 필드는 kind·label·value·unit·year·quote 라, 화면에
+       *   `f1 f2 f3…` 만 뜨고 정작 봐야 할 수치가 안 보였다. 이 목록을 눈으로
+       *   확인하라고 만든 자리인데 확인할 것이 없었다. */
+      pre.textContent = facts.map((f) => {
+        const has = (x) => x !== undefined && x !== null && x !== "";
+        const val = [f.value, f.unit].filter(has).join("");
+        const yr = f.year ? ` (${f.year})` : "";
+        const head = `${f.id}  [${f.kind || "사실"}] ${f.label || ""} = ${val}${yr}`;
+        return f.quote ? head + NL + `      근거: ${f.quote}` : head;
+      }).join(NL);
     }).catch(() => { pre.textContent = "(아직 없음)"; });
     c.appendChild(el("div", "hint", "사실 — 대본이 여기서 골라 씁니다."));
     c.appendChild(pre);
