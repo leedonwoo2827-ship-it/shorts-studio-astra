@@ -63,20 +63,27 @@ ARTSPEC_SCHEMA: Dict[str, Any] = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["no", "stage", "layout", "motion"],
+                "required": ["no", "claim", "stage", "layout", "change"],
                 "properties": {
                     "no": {"type": "integer", "minimum": 1, "maximum": 8},
-                    # 무엇이 있는 장면인가. 규격·금지목록은 코드가 붙인다 —
-                    # 모델이 매번 다시 쓰면 그 문장이 흔들리고, 흔들리면 결과가 흔들린다.
+
+                    # ★ **이 필드가 이 스키마의 요점이다.**
+                    #   먼저 「그 문장이 무엇을 주장하는가」를 적게 한다.
+                    #   실측(2026-09-08): 이게 없으니 낱말을 글자 그대로 옮겼다 —
+                    #   「대학을 설계했습니다」에 설계도면을 그리고,
+                    #   「우편이 쌓이는데」에 봉투를 쌓았다. 문장이 말한 것은
+                    #   비유이거나 관계인데 배경만 그린 것이다.
+                    "claim": {"type": "string", "minLength": 10, "maxLength": 200},
+
+                    # 1차 설계 — 정지 상태로 성립하는 상황 한 장
                     "stage": {"type": "string", "minLength": 20, "maxLength": 600},
                     "layout": {"type": "string", "minLength": 20, "maxLength": 600},
-                    # ★ 이 배열이 이 스키마의 요점이다. 한 씬에 셋을 넘기지 않는다 —
-                    #   동시에 셋이 움직이면 30초 화면에서 아무것도 안 보인다.
-                    #   각 줄은 「무엇이 · 어떻게 · 언제」를 담아야 해서 하한을 둔다.
-                    "motion": {
-                        "type": "array", "minItems": 1, "maxItems": 3,
-                        "items": {"type": "string", "minLength": 15, "maxLength": 240},
-                    },
+
+                    # 변동 — 그 위에서 바뀌는 **단 하나**. 이것이 곧 주장이다.
+                    "change": {"type": "string", "minLength": 20, "maxLength": 300},
+                    # 거드는 것 하나까지만. 셋이 동시에 움직이면 아무것도 안 보인다.
+                    "support": {"type": "string", "maxLength": 240},
+
                     "palette_note": {"type": "string", "maxLength": 300},
                 },
             },

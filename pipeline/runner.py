@@ -126,9 +126,12 @@ def stage_artspec(slug: str, log: Log, **_: Any) -> Dict[str, Any]:
     out = s5_artspec.run(slug, on_activity=lambda m: log(f"  · {m}"))
     log(f"  장면 지시 {out['count']}개 · ${out.get('cost_usd', 0):.2f}")
     for r in out.get("scenes") or []:
-        log(f"    씬 {r['no']} · {r['sec']}초 · 움직임 {len(r['motion'])}가지")
-        for m in r["motion"]:
-            log(f"      - {m}")
+        log(f"    씬 {r['no']} · 화면 {r.get('scene_sec', r['sec'])}초 · 동작은 {r['sec']}초 안에")
+        log(f"      주장 : {r.get('claim', '')}")
+        log(f"      무대 : {r.get('stage', '')[:100]}")
+        log(f"      변동 : {r.get('change', '')}")
+        if r.get("support"):
+            log(f"      거듦 : {r['support']}")
     for w in out.get("warnings") or []:
         log(f"  ⚠ {w}")
     return out

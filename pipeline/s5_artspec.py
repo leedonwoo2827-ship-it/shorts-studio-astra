@@ -27,10 +27,12 @@ from . import prompts
 from .schemas import ARTSPEC_SCHEMA
 
 SYSTEM = (
-    "너는 모션 그래픽 감독이다. 씬마다 무엇이 어떻게 움직이는지를 "
-    "코드로 옮길 수 있을 만큼 구체적으로 적는다. "
+    "너는 모션 그래픽 감독이다. "
+    "먼저 그 문장이 무엇을 주장하는지 정하고, 그 주장이 보이도록 무대를 짜고, "
+    "무대 위에서 하나만 바꾼다. "
+    "낱말을 그림으로 옮기지 않는다 — 문장이 참이라고 말하는 것을 그린다. "
     "장면 안에 글자를 절대 넣지 않는다. "
-    "추상어를 쓰지 않고 눈에 보이는 것만 적는다. "
+    "사람의 몸을 그리지 않는다. "
     "반드시 제시된 JSON 스키마대로만 답한다."
 )
 
@@ -57,11 +59,16 @@ _LOOPY = ("주기", "반복", "왕복", "흔들", "깜빡", "진동", "오간다
           "펄럭", "출렁", "떨린")
 
 
+def motions(r: Dict[str, Any]) -> List[str]:
+    """한 씬의 움직임 — 변동 하나 + 거드는 것 하나(있으면)."""
+    return [x for x in (r.get("change"), r.get("support")) if x]
+
+
 def find_loopy(rows: List[Dict[str, Any]]) -> List[str]:
     """되풀이를 뜻하는 말이 든 동작 줄을 찾아 돌려준다."""
     hits: List[str] = []
     for r in rows:
-        for m in r.get("motion") or []:
+        for m in motions(r):
             for w in _LOOPY:
                 if w in m:
                     hits.append(f"씬 {r['no']}: 「{w}」 — {m[:70]}")
@@ -130,7 +137,7 @@ def run(slug: str, *, on_activity: Optional[Callable[[str], None]] = None
             *(f"- {h}" for h in loopy),
             "",
             "한 방향으로 한 번만 가서 그 자리에 멈추는 동작으로 바꿔 다시 주세요.",
-            "씬 수와 장면 내용은 그대로 두고 `motion` 만 고치세요.",
+            "씬 수와 무대는 그대로 두고 `change`·`support` 만 고치세요.",
         ])
         out2, cost2 = structured("artspec", SYSTEM, again, ARTSPEC_SCHEMA,
                                  on_activity=on_activity)
@@ -159,9 +166,11 @@ def run(slug: str, *, on_activity: Optional[Callable[[str], None]] = None
             "sec": window(s)[0],          # 동작이 끝나야 하는 시각
             "scene_sec": window(s)[1],    # 화면에 있는 시간
             "role": s.get("role") or "body",
+            "claim": r["claim"].strip(),
             "stage": r["stage"].strip(),
             "layout": r["layout"].strip(),
-            "motion": [m.strip() for m in r["motion"]],
+            "change": r["change"].strip(),
+            "support": (r.get("support") or "").strip(),
             "palette_note": (r.get("palette_note") or "").strip(),
         })
 

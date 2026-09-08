@@ -41,7 +41,8 @@ STILL = (".png", ".jpg", ".jpeg", ".webp")
 
 def stamp(spec: Dict[str, Any]) -> str:
     """지시가 바뀌었는지 보는 도장. 장면 내용에 영향을 주는 것만 넣는다."""
-    raw = json.dumps({k: spec.get(k) for k in ("stage", "layout", "motion",
+    raw = json.dumps({k: spec.get(k) for k in ("claim", "stage", "layout",
+                                               "change", "support",
                                                "palette_note", "sec")},
                      ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
@@ -103,8 +104,11 @@ def run(slug: str, *, force: bool = False, only: Optional[List[int]] = None,
             kept.append(no)
             continue
         todo.append({"no": no, "file": r["file"], "sec": r.get("sec"),
+                     "scene_sec": r.get("scene_sec"),
+                     "claim": r.get("claim", ""),
                      "stage": r["stage"], "layout": r["layout"],
-                     "motion": r["motion"],
+                     "change": r.get("change", ""),
+                     "support": r.get("support", ""),
                      "palette_note": r.get("palette_note", "")})
 
     if not todo:
