@@ -152,7 +152,10 @@ body {
 .cc {
   position: absolute;
   left: 72px; right: 72px;
-  bottom: 168px;
+  /* ★ **자막은 아래에서 자란다.** `bottom` 을 잡아 두면 줄이 늘 때 위로 자라야
+     하는데, 실측(v04)에서 두 줄짜리가 해시태그를 덮었다 — 자막 마지막 줄과 태그가
+     겹쳐 둘 다 못 읽었다. 태그 윗자리(86+34+여유)를 비우고 그 위에 앉힌다. */
+  bottom: 196px;
   z-index: 4;
   /* ★ 자막은 **크고 굵고 진해야** 한다. 옅은 본문색(--text) 58px 로 굽고
      보니 숫자가 안 읽혔다(실측: v01 프레임). 잘 도는 쇼츠는 자막이 화면에서
@@ -184,13 +187,20 @@ body {
 /* 해시태그 — 30초 내내 한 자리에 있다 */
 .tags {
   position: absolute;
-  left: 0; right: 0; bottom: 86px;
+  /* ★ 좌우 여백이 0 이라 화면 끝까지 붙었고, 태그가 여덟 개를 넘으면 마지막
+     하나가 **잘려 나갔다**(실측 v04: 「#열린지식의시대」가 반만 보였다).
+     띠 안쪽으로 들여놓고 줄바꿈을 허용한다 — 두 줄까지는 아이보리가 받쳐 준다. */
+  left: 56px; right: 56px; bottom: 78px;
   z-index: 4;
-  font-size: 34px;
+  font-size: 30px;
   font-weight: 700;
   letter-spacing: 0.01em;
+  line-height: 1.28;
   color: color-mix(in srgb, var(--ink) 58%, var(--ivory));
   text-align: center;
+  /* 태그는 낱말 가운데가 갈리면 안 된다 — 어절(태그) 경계에서만 끊는다 */
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 /* ── 진행 레일 — 위 띠 맨 아래. 씬이 몇 개고 지금 몇 번째인지 보인다 ── */
