@@ -6,6 +6,7 @@
 
     projects/<slug>/
       00_기획/     원본 파일 · source.json          ← 사람이 넣는 것은 여기뿐
+                   source.md · 원고.html · 구조.json   (재료를 갈아 내는 세 단계)
       01_대본/     script.json ★ · overrides.json · 발음교정표.txt
       02_음성/     001.wav …                        (실측 길이가 씬 길이를 정한다)
       03_자막/     <slug>.srt · cue-sheet.csv
@@ -70,6 +71,10 @@ def overrides(slug: str) -> Path:     return project(slug) / SCRIPT / "overrides
 def pron_table(slug: str) -> Path:    return project(slug) / SCRIPT / "발음교정표.txt"
 def source_md(slug: str) -> Path:     return project(slug) / PLAN / "source.md"
 def source_json(slug: str) -> Path:   return project(slug) / PLAN / "source.json"
+# 원고·구조는 `00_기획/` 에 둔다. 폴더 번호를 새로 끼우면 01_대본~06_완성 이 전부
+# 밀려 이미 만든 프로젝트가 깨진다. 둘 다 「재료를 갈아 내는 일」이라 제자리도 여기다.
+def draft_html(slug: str) -> Path:    return project(slug) / PLAN / "원고.html"
+def structure_json(slug: str) -> Path: return project(slug) / PLAN / "구조.json"
 def audio_dir(slug: str) -> Path:     return project(slug) / AUDIO
 def wav(slug: str, no: int) -> Path:  return project(slug) / AUDIO / f"{no:03d}.wav"
 def subs_dir(slug: str) -> Path:      return project(slug) / SUBS

@@ -39,11 +39,44 @@ ANIMATED = (".svg",)
 STILL = (".png", ".jpg", ".jpeg", ".webp")
 
 
+def _snap(beats: List[Dict[str, Any]], cues: List[Dict[str, Any]],
+          mot_sec: float) -> List[Dict[str, Any]]:
+    """박자 시각을 자막 조각에 맞춘다. 글은 모델의 것, 시각은 코드의 것.
+
+    박자 i 는 조각 i 가 시작할 때 시작하고, 다음 조각이 시작할 때 끝난다.
+    박자가 조각보다 많으면 남은 것을 마지막 구간에 고르게 나눠 넣는다 —
+    창이 겹치면 셋이 동시에 움직여 아무것도 안 보이므로 겹치지 않게만 둔다.
+    """
+    if not beats:
+        return []
+    if not cues:
+        return beats
+    edges = [float(c.get("t") or 0.0) for c in cues]
+    end = mot_sec if mot_sec > 0 else (edges[-1] + 1.0)
+    out: List[Dict[str, Any]] = []
+    for i, b in enumerate(beats):
+        if i < len(edges):
+            at = edges[i]
+            until = edges[i + 1] if i + 1 < len(edges) else end
+        else:
+            # 조각보다 박자가 많다 — 마지막 조각 구간을 쪼개 나눈다.
+            extra = len(beats) - len(edges)
+            k = i - len(edges)
+            span = max(0.2, (end - edges[-1]) / max(1, extra + 1))
+            at = edges[-1] + span * (k + 1)
+            until = min(end, at + span)
+        out.append({"at": round(at, 3), "until": round(max(at + 0.2, until), 3),
+                    "what": str(b.get("what") or "")})
+    return out
+
+
 def stamp(spec: Dict[str, Any]) -> str:
     """지시가 바뀌었는지 보는 도장. 장면 내용에 영향을 주는 것만 넣는다."""
+    # 칸·연쇄·두루마리 높이도 넣는다 — 이것들이 바뀌면 그림이 아예 달라진다.
     raw = json.dumps({k: spec.get(k) for k in ("claim", "stage", "layout",
                                                "change", "support",
-                                               "palette_note", "sec")},
+                                               "palette_note", "sec",
+                                               "canvas_h", "cells", "beats")},
                      ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
@@ -87,6 +120,16 @@ def run(slug: str, *, force: bool = False, only: Optional[List[int]] = None,
     if not rows:
         raise RuntimeError("장면 지시가 비어 있습니다.")
 
+    # 자막 조각 — 씬 번호로 찾아 쓴다. 음성 실측에서 나온 시각이라 어긋날 여지가 없다.
+    say: Dict[int, list] = {}
+    sj = paths.script_json(slug)
+    if sj.exists():
+        try:
+            for s in (json.loads(sj.read_text(encoding="utf-8")).get("scenes") or []):
+                say[int(s.get("no") or 0)] = list(s.get("cues") or [])
+        except Exception:  # noqa: BLE001
+            say = {}
+
     art_dir = paths.art_dir(slug)
     art_dir.mkdir(parents=True, exist_ok=True)
     have = present(slug)
@@ -103,13 +146,29 @@ def run(slug: str, *, force: bool = False, only: Optional[List[int]] = None,
         if (not force and got and is_animated(got) and r.get("_of") == want):
             kept.append(no)
             continue
-        todo.append({"no": no, "file": r["file"], "sec": r.get("sec"),
-                     "scene_sec": r.get("scene_sec"),
-                     "claim": r.get("claim", ""),
-                     "stage": r["stage"], "layout": r["layout"],
-                     "change": r.get("change", ""),
-                     "support": r.get("support", ""),
-                     "palette_note": r.get("palette_note", "")})
+        # ★ 필드를 **손으로 고르지 않는다.** 예전에는 목록으로 골라 담았는데,
+        #   두루마리를 넣을 때 `canvas_h`·`cells`·`beats` 가 조용히 빠졌다.
+        #   결과: 아스트라가 칸 지시를 못 받아 한 화면만 그렸고, 검사기는
+        #   `cells` 가 없어 칸 수를 1로 계산해 그 1920px 을 통과시켰다.
+        #   **둘이 같은 원인으로 동시에 눈이 멀었다**(실측 2026-09-08).
+        #   그래서 이제 통째로 넘기고 코드가 쓰지 않는 것만 뺀다 —
+        #   필드가 늘어도 자동으로 따라간다.
+        row = {k: v for k, v in r.items() if not k.startswith("_")}
+        # ★ 자막 조각 시각을 함께 넘긴다. **말이 그것을 말할 때 그것이 드러나야**
+        #   장면이 안 정적이다. 실측(2026-09-08): 이걸 안 주니 아스트라가 그림을
+        #   처음부터 다 켜 두고 뒤늦게 2.3~4.0초에 11개를 몰아 터뜨렸다 —
+        #   앞 2.3초가 죽고 스티커를 흩뿌린 것처럼 보였다.
+        #   장면 지시가 아니라 여기서 붙이는 이유: 자막을 사람이 고치면 조각이
+        #   바뀌는데, 그때 장면 지시($)를 다시 돌리게 만들면 안 된다.
+        cues = list(say.get(no) or [])
+        row["cues"] = [{"t": c.get("t"), "text": c.get("text")} for c in cues]
+        # ★ 박자 시각을 **자막 조각에 붙인다.** 안 붙이면 아스트라에게 시간표가
+        #   두 개 간다 — 조각은 0.0/1.66/3.49 인데 박자는 0.3/1.5/2.7 이라
+        #   어느 쪽에 맞출지 모른다. 말이 기준이므로 말에 맞춘다.
+        #   글(`what`)은 모델의 것이고 시각은 코드의 것이다.
+        row["beats"] = _snap(row.get("beats") or [], cues,
+                             float(r.get("sec") or 0.0))
+        todo.append(row)
 
     if not todo:
         return {"made": [], "kept": kept, "model": model or _model()}

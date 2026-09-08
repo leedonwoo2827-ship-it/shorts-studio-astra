@@ -20,7 +20,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 _DEFAULTS: Dict[str, Any] = {
     "port": 8899,
-    "shorts": {"cuts": 3, "seconds": 30.0, "gap_sec": 0.12},
+    # 씬 수는 기본값이 없다 — 재료가 정한다. `cuts_max` 는 상한일 뿐이다.
+    "shorts": {"format": "narrative", "seconds_min": 20.0, "seconds_max": 30.0,
+               "cuts_max": 8, "cue_max": 26, "cue_max_listicle": 12,
+               "gap_sec": 0.12},
     "narration": {"chars_per_sec": 6.51, "voice": "F2", "speed": 1.2, "total_step": 8},
     "compose": {"width": 1080, "height": 1920, "fps": 30,
                 "band_top": 300, "band_bottom": 320,
@@ -31,16 +34,17 @@ _DEFAULTS: Dict[str, Any] = {
               "concurrency": 2, "retries": 2},
     "render": {"quality": "standard", "format": "mp4", "workers": 0},
     "tts": {"engine": "edge", "timeout_ms": 300000},
-    "models": {"script": "claude-opus-5", "imgprompt": "claude-opus-5",
-               "meta": "claude-sonnet-5"},
-    "effort": {"script": "high", "imgprompt": "high", "meta": "medium"},
+    "models": {"draft": "claude-opus-5", "script": "claude-opus-5",
+               "artspec": "claude-opus-5", "meta": "claude-sonnet-5"},
+    "effort": {"draft": "high", "script": "high",
+               "artspec": "high", "meta": "medium"},
     "budget_usd": {"per_stage": 1.5, "warn_total": 5.0},
 }
 
 # 환경변수로 덮을 수 있는 것만 — 나머지는 파일로만 바꾼다
 _ENV = {
     "SHORTS_PORT": ("port", int),
-    "SHORTS_CUTS": ("shorts.cuts", int),
+    "SHORTS_FORMAT": ("shorts.format", str),
     "SHORTS_TTS_ENGINE": ("tts.engine", str),
 }
 
@@ -102,6 +106,20 @@ def get(dotted: str, default: Any = None) -> Any:
     return node
 
 
+def seconds_range() -> tuple[float, float]:
+    """목표 길이 범위 `(min, max)`. 사람이 정하는 둘 중 하나다(다른 하나는 형식).
+
+    예전 `shorts.seconds` 하나만 있는 설정 파일도 읽는다 — 그 값을 max 로 본다.
+    """
+    lo = get("shorts.seconds_min")
+    hi = get("shorts.seconds_max")
+    if hi is None:
+        hi = get("shorts.seconds", 30.0)      # 옛 설정
+    if lo is None:
+        lo = max(1.0, float(hi) - 10.0)
+    return float(lo), float(hi)
+
+
 def budget_chars(cuts: int | None = None) -> int:
     """대본 글자 예산.
 
@@ -110,12 +128,19 @@ def budget_chars(cuts: int | None = None) -> int:
     ★ 숨을 빼는 이유 — 씬이 3개면 사이가 2개고, 그 시간에는 아무 말도 안 한다.
       안 빼면 대본이 목표보다 그만큼 길어지고, 30초에 맞추려던 영상이 넘친다.
 
+    ★ 예산은 `seconds_max` 로 넉넉히 잡는다. 대본이 재료가 부르는 만큼 담게 두고,
+      실제 길이는 **음성 실측**이 정한다 — 여기서 조여 놓으면 씬 수를 손으로 정하던
+      옛 문제가 이름만 바꿔 돌아온다.
+
+    ★ `cuts` 를 주면 그 씬 수의 숨을 뺀다. 안 주면 상한(`cuts_max`)으로 본다 —
+      숨을 넉넉히 빼는 쪽이 안전하다(예산이 조금 작아진다).
+
     ★ `chars_per_sec` 는 **엔진마다 다르다.** config 의 `_실측` 메모를 보라.
       TTS 엔진을 바꾸면 한 편 굽고 다시 재서 이 값을 갱신해야 한다.
     """
-    n = int(cuts or get("shorts.cuts", 3))
+    n = int(cuts or get("shorts.cuts_max", 8))
     breath = max(0, n - 1) * float(get("shorts.gap_sec", 0.12))
-    speakable = max(1.0, float(get("shorts.seconds", 30.0)) - breath)
+    speakable = max(1.0, seconds_range()[1] - breath)
     return round(speakable
                  * get("narration.chars_per_sec", 6.51)
                  * get("narration.speed", 1.2))

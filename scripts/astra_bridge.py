@@ -165,6 +165,49 @@ def ask(prompt: str, model: str, timeout: int, cwd: Path,
     return out, ""
 
 
+def check_scroll(svg: str, cell_h: int, tmp_dir: Path) -> List[str]:
+    """칸 경계를 넘는 요소가 있는지 **브라우저에게 물어본다.**
+
+    ★ 실측(2026-09-08): 아스트라가 세 칸을 잇겠다고 위에서 아래로 얇은
+      「우편로」 선을 하나 그었다. 프롬프트로 막았는데도 그랬다. 카메라는 한 번에
+      한 칸만 잡으므로 그 선은 이음으로 안 읽히고 화면을 관통하는 획이 된다 —
+      **흐름은 음성과 드러남이 만든다. 칸을 잇는 것은 카메라의 일이다.**
+
+    ★ `d` 를 정규식으로 재지 않는 이유: 상대 명령(c·l·v)이 섞이면 곧 틀린다.
+      `getBBox()` 는 브라우저가 실제로 그린 상자라 어긋날 여지가 없다.
+
+    검사기를 못 부르면(node 없음 등) **막지 않는다** — 빈 목록을 돌려준다.
+    이건 화면을 더 좋게 만드는 검사이고, 못 돌린다고 장면을 버릴 값은 아니다.
+    """
+    script = ROOT / "tools" / "check_scroll.mjs"
+    if not script.is_file():
+        return []
+    tmp = tmp_dir / "_scroll_check.svg"
+    try:
+        tmp.write_text(svg, encoding="utf-8")
+        r = subprocess.run(["node", str(script), str(tmp), str(cell_h)],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=90, cwd=str(ROOT))
+        out = json.loads((r.stdout or "").strip().splitlines()[-1])
+    except Exception:  # noqa: BLE001
+        return []
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+    if out.get("ok"):
+        return []
+    if out.get("error"):
+        return []                      # 검사기 자체 문제 — 장면을 버리지 않는다
+    n = out.get("total") or len(out.get("bad") or [])
+    where = ", ".join(f"{b['tag']}(y {b['y0']}~{b['y1']}, 칸 {b['cells']})"
+                      for b in (out.get("bad") or [])[:3])
+    return [f"칸 경계를 넘는 요소가 {n}개 있습니다 — {where}. "
+            f"칸마다 그림이 그 칸 안에서 끝나야 합니다. 칸을 잇는 선을 그리지 마세요"]
+
+
 def build_prompt(job: Dict[str, Any], sc: Dict[str, Any]) -> str:
     """씬 하나를 그리게 하는 말. **주장 → 무대 → 변동** 순서로 준다.
 
@@ -172,8 +215,12 @@ def build_prompt(job: Dict[str, Any], sc: Dict[str, Any]) -> str:
       실측(2026-09-08): 「백만 중 열에 하나」에 광부 사택 부엌을 그렸다.
     """
     c, pal = job["canvas"], job["palette"]
-    w, h = c["width"], c["height"]
-    top, bot = c["band_top"], c["band_bottom"]
+    w, cell_h = int(c["width"]), int(c["height"])
+    top, bot = int(c["band_top"]), int(c["band_bottom"])
+    # 두루마리 — 칸 N 개면 높이가 N 배다. 칸 하나면 예전과 같은 한 화면이다.
+    cells = list(sc.get("cells") or [])
+    n_cells = max(1, len(cells))
+    h = int(sc.get("canvas_h") or cell_h * n_cells)
     lines = [
         "세로 쇼츠의 한 씬을 **움직이는 SVG** 로 만들어 주세요.",
         "답은 SVG 하나만 주세요. 설명도 코드펜스도 붙이지 마세요.",
@@ -192,6 +239,68 @@ def build_prompt(job: Dict[str, Any], sc: Dict[str, Any]) -> str:
         "[변동 — 무대 위에서 바뀌는 단 하나. 이것이 곧 위 주장입니다]",
         f"  {sc['change']}",
     ]
+    if n_cells > 1:
+        lines += ["", f"[두루마리 — 이 그림은 화면 {n_cells}개분 높이입니다]",
+                  f"  세로로 이어지는 지면을 **칸 {n_cells}개**로 나눠 그리세요.",
+                  f"  칸 하나가 화면 하나({w}x{cell_h})입니다. 카메라가 칸에서",
+                  "  칸으로 **끊어 뛰며** 한 칸씩 보여 줍니다.",
+                  "  ★★ **칸을 잇는 선을 그리지 마세요.** 길·실·화살표로 칸을",
+                  "     연결하려 하지 마세요. 카메라는 한 번에 **한 칸만** 잡으므로",
+                  "     그 선은 이음으로 안 읽히고 화면을 관통하는 정체불명의 획이",
+                  "     됩니다. 흐름은 **음성과 드러남**이 이미 만듭니다 —",
+                  "     칸을 잇는 것은 카메라의 일입니다.",
+                  "  ★ 모든 그림은 **자기 칸 안에서 끝나야** 합니다. 경계에 걸치면",
+                  "     반쪽으로 잘립니다. 검사기가 좌표를 재서 되돌려보냅니다."]
+        for cell in cells:
+            k = int(cell.get("no") or 1)
+            y0, y1 = (k - 1) * cell_h, k * cell_h
+            # ★ 「크게」·「꽉」 같은 말로는 안 됩니다 — 실측(2026-09-08): 「낱개」
+            #   칸에 작업대를 그릴 수 있는 높이의 35% 크기로 그려서 컷이
+            #   헐거웠습니다. **차지할 비율을 숫자로** 줍니다.
+            draw_h = cell_h - top - bot
+            fill = {
+                "낱개": f"사물 **하나만**. 그릴 수 있는 높이({draw_h}px)의 "
+                        f"**60% 이상**을 차지하게 크게. 주변은 비웁니다",
+                "꽉": f"그릴 수 있는 높이({draw_h}px)를 **80% 이상** 채웁니다. "
+                      f"세로로 쌓아 올리세요",
+                "여백": f"가로로 넓게 펼쳐 폭을 꽉 쓰고, 높이는 {draw_h}px 의 "
+                        f"**45% 안쪽**으로 두어 위아래를 비웁니다",
+            }.get(str(cell.get("fill") or "꽉"), "칸을 채웁니다")
+            lines += [f"  칸{k} — {cell.get('what', '')}",
+                      f"        칸 범위 y={y0}~{y1} · "
+                      f"**그릴 수 있는 y={y0 + top}~{y1 - bot}**",
+                      f"        채움: {fill}"]
+        lines += ["  칸마다 **다른 사물**이어야 합니다. 앞 칸의 주인공을 되쓰지 마세요.",
+                  "  칸마다 채움이 달라야 합니다 — 전부 꽉 채우면 리듬이 없습니다."]
+
+    cues = list(sc.get("cues") or [])
+    if cues:
+        lines += ["", "[말의 순서 — ★ 이 시각에 그것이 드러나야 합니다]",
+                  "  아래는 이 씬에서 흐르는 자막입니다. **말이 그것을 말할 때",
+                  "  그것이 화면에 들어와야** 합니다. 그림을 처음부터 다 켜 두면",
+                  "  화면이 정적입니다 — 스티커를 흩뿌린 것처럼 보입니다."]
+        for c in cues:
+            lines.append(f"    {c.get('t')}초 — 「{c.get('text')}」")
+        lines += [
+            "  ★ 드러나는 방식이 요점입니다. **그냥 나타나면 슬라이드쇼입니다** —",
+            "    드러날 때 **같이 움직여야** 합니다. 이 셋 중 하나로 하세요:",
+            "      · opacity 0→1 **과 함께** transform translate (옆·아래에서 들어옴)",
+            "      · stroke-dasharray/dashoffset 으로 선이 **그어져 나감**",
+            "      · 낮은 곳에서 제 자리로 **자라남**(scale 이나 높이 늘기)",
+            "  ★ 처음 자막 시각(보통 0초)에 드러날 것도 있어야 합니다. 앞부분을",
+            "    비워 두고 뒤에 몰아 터뜨리지 마세요 — 실측으로 앞 2.3초가 죽었습니다.",
+            "  ★ 무대의 뼈대(바닥선·바탕 사물 한둘)는 처음부터 있어도 됩니다.",
+            "    나머지는 숨겨 두고 말에 맞춰 들어옵니다.",
+        ]
+
+    if sc.get("beats"):
+        lines += ["", "[동작 연쇄 — 차례로 하나씩. 반복이 아니라 순차입니다]"]
+        for b in sc["beats"]:
+            lines.append(f"  {b.get('at')}~{b.get('until')}초 : {b.get('what', '')}")
+        lines += ["  ★ 창을 겹치지 마세요. 앞 동작이 끝난 뒤에 다음이 시작합니다 —",
+                  "    셋이 동시에 움직이면 아무것도 안 보입니다.",
+                  "  각각 한 방향으로 한 번 가서 그 자리에 멈춥니다(fill=\"freeze\")."]
+
     if sc.get("support"):
         lines += ["", "[거드는 것 — 주인공이 끝난 뒤에 시작합니다]",
                   f"  {sc['support']}"]
@@ -206,8 +315,13 @@ def build_prompt(job: Dict[str, Any], sc: Dict[str, Any]) -> str:
         "  남은 시간에는 화면이 정지한 채 내레이션이 이어집니다 — 의도한 모양입니다.",
         f"  바탕: 화면 전체를 {pal['ivory']} 단색으로 채우는 <rect> 를 맨 처음에.",
         "  네 귀퉁이까지 같은 밝기 — 어두운 배경·비네팅·발광 금지.",
-        f"  **위 {top}px 와 아래 {bot}px 는 비워 두세요** (앱이 후크와 자막을 얹습니다).",
-        f"  장면은 y={top}~{h - bot} 안에서만 그리고 움직이세요.",
+        (f"  **칸마다** 위 {top}px 와 아래 {bot}px 는 비워 두세요 "
+         f"(앱이 그 자리에 후크와 자막을 얹습니다)."
+         if n_cells > 1 else
+         f"  **위 {top}px 와 아래 {bot}px 는 비워 두세요** (앱이 후크와 자막을 얹습니다)."),
+        ("  비워 둘 자리는 칸 목록에 y 범위로 적어 두었습니다."
+         if n_cells > 1 else
+         f"  장면은 y={top}~{h - bot} 안에서만 그리고 움직이세요."),
         "",
         "[화풍]",
         f"  {job['style_hint']}",
@@ -227,6 +341,15 @@ def build_prompt(job: Dict[str, Any], sc: Dict[str, Any]) -> str:
         "  · 밀도는 **사물과 공간**에서 냅니다. 직선과 원으로 이루어진 것을 촘촘히.",
         "    선을 긋는 애니메이션(stroke-dasharray + stroke-dashoffset)이 주된 손입니다.",
         "  · path 를 아끼지 마세요. 60~150개면 기준 그림만 한 밀도가 나옵니다.",
+        "  · **처음부터 다 보이게 두지 마세요.** 사물 대부분을 `opacity=\"0\"` 으로",
+        "    두고 말의 시각에 맞춰 들여보내세요. 실측(2026-09-08): 그림을 전부",
+        "    켜 두고 뒤에 잔가지만 켜니 화면이 4초 내내 정적이었습니다.",
+        "  · **글자를 흉내낸 획도 그리지 마세요.** <text> 만 금지가 아닙니다 —",
+        "    속기 기호·필기체·서명 흉내를 path 로 그려도 사람 눈에는 글자로",
+        "    읽힙니다. 종이 위에는 줄만 긋고 낱말 모양을 만들지 마세요.",
+        "  · **사물들이 같은 바닥을 밟게 하세요.** 흩어진 사물 여덟 개는 스티커",
+        "    묶음처럼 보입니다 — 바닥선·작업대·선반 같은 공통 자리를 먼저 두고",
+        "    그 위에 얹으세요.",
         "  · 실존 로고 금지.",
         "",
         "[붙인 그림에 대하여]",
@@ -253,7 +376,7 @@ def main() -> int:
         timeout = int(job.get("timeout_sec") or 600)
         retries = int(job.get("retries") or 1)
         w = int(job["canvas"]["width"])
-        h = int(job["canvas"]["height"])
+        cell_h = int(job["canvas"]["height"])
 
         # ★ 씬을 **하나씩 차례로** 부른다. 아스트라는 5시간 한도가 빡빡해서
         #   동시에 여러 개를 던지면 중간에 끊기고, 그때 어디까지 됐는지 모른다.
@@ -261,8 +384,15 @@ def main() -> int:
             no = int(sc["no"])
             name = sc.get("file") or f"{no:03d}.svg"
             last = ""
+            n_cells = max(1, len(sc.get("cells") or []))
+            exp_h = int(sc.get("canvas_h") or cell_h * n_cells)
             for attempt in range(1, retries + 2):
-                print(f"[{no}] {model} 에게 장면을 맡깁니다 ({attempt}번째)", flush=True)
+                # ★ 기대 규격을 **찍는다.** 예전에 `cells` 가 job 에서 빠져 칸 수가
+                #   1 로 계산됐고, 아스트라가 한 화면만 그린 것을 검사기가 그대로
+                #   통과시켰다 — 로그에 아무것도 안 남아서 SVG 를 열어 보고서야
+                #   알았다(실측 2026-09-08).
+                print(f"[{no}] {model} 에게 장면을 맡깁니다 ({attempt}번째) "
+                      f"— 칸 {n_cells}개 · viewBox 0 0 {w} {exp_h}", flush=True)
                 raw, err = ask(build_prompt(job, sc), model, timeout, ROOT,
                                refs=job.get("style_refs") or [])
                 if err:
@@ -279,7 +409,11 @@ def main() -> int:
                     continue
 
                 svg = extract_svg(raw)
-                bad = check_svg(svg, w, h)
+                # 두루마리는 화면보다 높다. 검사에 **씬별** 높이를 넘긴다 —
+                # 문서 최상위 canvas 로 재면 칸이 여러 개인 씬이 전부 걸린다.
+                bad = check_svg(svg, w, exp_h)
+                if not bad and n_cells > 1:
+                    bad = check_scroll(svg, cell_h, out_dir)
                 if bad:
                     last = " · ".join(bad)
                     print(f"[{no}] 검사에 걸림 — {last[:200]}", flush=True)

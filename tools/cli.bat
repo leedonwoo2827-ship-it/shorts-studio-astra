@@ -100,7 +100,7 @@ goto menu
 :one
 echo.
 echo   Stages:  source  script  speech  tts  subs
-echo            imgprompt  images  compose  build  result
+echo            draft  structure  compose  build  result
 echo.
 set "SLUG="
 set /p "SLUG=  Project name: "

@@ -151,10 +151,18 @@ def run(slug: str, *, force: bool = False,
                            "total_sec": total}
     if failed:
         out["failed"] = failed
-    target = float(doc.get("seconds") or config.get("shorts.seconds", 30.0))
-    if total > target + 1.0:
-        out["warning"] = (f"음성 합계가 {total:.1f}초로 목표 {target:.0f}초를 넘습니다. "
+    # 길이는 **범위**다. 컷이 잦으면 20초도 좋다 — 넘거나 못 미칠 때만 알린다.
+    lo, hi = config.seconds_range()
+    lo = float(doc.get("seconds_min") or lo)
+    hi = float(doc.get("seconds_max") or doc.get("seconds") or hi)
+    if total > hi + 1.0:
+        out["warning"] = (f"음성 합계가 {total:.1f}초로 목표 범위 "
+                          f"{lo:.0f}~{hi:.0f}초를 넘습니다. 항목을 빼거나 "
                           f"자막 화면에서 문장을 줄이세요.")
+    elif total and total < lo - 1.0:
+        out["warning"] = (f"음성 합계가 {total:.1f}초로 목표 범위 "
+                          f"{lo:.0f}~{hi:.0f}초에 못 미칩니다. 재료에 담을 사실이 "
+                          f"더 있는지 「구조」 탭에서 보세요.")
     return out
 
 

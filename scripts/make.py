@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 """CLI — 창 없이 돌릴 때. 화면(run.bat 의 W)과 **같은 코드를 부른다.**
 
-    python scripts/make.py new  <원본파일> [--title 제목] [--cuts 3]
+★ **`.venv-app` 의 파이썬으로 부르세요.** 시스템 파이썬에는 `claude_agent_sdk` 가
+  없어서 돈 쓰는 단계가 `ModuleNotFoundError` 로 죽습니다 — 무료 단계만 돌 때는
+  모르고 지나갑니다. `run.bat`·`tools/cli.bat` 은 알아서 그걸 씁니다.
+
+    .venv-app/Scripts/python.exe scripts/make.py new  <원본파일> [--title 제목] [--fmt listicle]
     python scripts/make.py all  <slug> [--skip images]
     python scripts/make.py run  <slug> <단계키> [--force] [--only 3,4]
     python scripts/make.py list
@@ -38,7 +42,7 @@ def cmd_new(a) -> int:
     shutil.copy2(src, paths.plan_dir(slug) / src.name)
     atomic_write_json(str(paths.source_json(slug)), {
         "file": src.name, "title": title,
-        "cuts": int(a.cuts or config.get("shorts.cuts", 3)),
+        "format": (getattr(a, "fmt", "") or config.get("shorts.format", "narrative")),
         "voice": config.get("narration.voice", "F2"),
         "speed": config.get("narration.speed", 1.2),
     }, indent=2)
@@ -56,7 +60,8 @@ def cmd_all(a) -> int:
 def cmd_run(a) -> int:
     only = [int(x) for x in a.only.split(",")] if a.only else None
     runner.run_stage(a.slug, a.stage, log, force=bool(a.force), only=only,
-                     cuts=a.cuts, skip_lint=bool(a.skip_lint))
+                     cuts=a.cuts, fmt=(a.fmt or None),
+                     skip_lint=bool(a.skip_lint))
     return 0
 
 
@@ -87,7 +92,9 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("new");   p.add_argument("source"); p.add_argument("--title")
-    p.add_argument("--cuts", type=int); p.set_defaults(fn=cmd_new)
+    p.add_argument("--fmt", choices=("narrative", "listicle"), default="",
+                   help="서사형 / 목록형. 씬 수는 재료가 정한다")
+    p.set_defaults(fn=cmd_new)
 
     p = sub.add_parser("all");   p.add_argument("slug")
     p.add_argument("--skip", nargs="*"); p.add_argument("--skip-lint", action="store_true")
@@ -96,7 +103,11 @@ def main() -> int:
     p = sub.add_parser("run");   p.add_argument("slug")
     p.add_argument("stage", choices=sorted(runner.FUNCS))
     p.add_argument("--force", action="store_true"); p.add_argument("--only")
-    p.add_argument("--cuts", type=int); p.add_argument("--skip-lint", action="store_true")
+    p.add_argument("--fmt", choices=("narrative", "listicle"), default="")
+    # ★ --cuts 는 **시험용 강제**다. 평소에는 주지 마라 — 주면 프롬프트에
+    #   「씬 수를 N개로 맞춰라」가 붙고, 그것이 v01~v13 의 문제였다.
+    p.add_argument("--cuts", type=int, help="시험용 강제. 평소에는 주지 마라")
+    p.add_argument("--skip-lint", action="store_true")
     p.set_defaults(fn=cmd_run)
 
     p = sub.add_parser("list");  p.set_defaults(fn=cmd_list)

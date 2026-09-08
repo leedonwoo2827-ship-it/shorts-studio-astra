@@ -44,11 +44,28 @@ body {
   will-change: transform;
 }
 
-/* 움직이는 장면 — 인라인 SVG 가 칸을 그대로 채운다.
+/* 카메라 판 — 그림칸보다 크고, GSAP 이 이 판을 밀어 올려 **칸에서 칸으로
+   끊어 뛴다.** 뛰는 것이 컷이다. 높이는 씬마다 달라서 인라인으로 준다
+   (칸 수 x artH). 칸이 하나면 그림칸과 같은 높이라 아무 일도 안 일어난다.
+
+   ★ 판을 SVG **밖에** 두는 것이 요점이다. 아스트라가 정지 그림을 줘도 화면은
+     여전히 움직이고, 자리표시(무료)로도 리듬을 시험할 수 있다. */
+.art { overflow: hidden; }
+.cam {
+  position: absolute;
+  left: 0; top: 0; width: 100%;
+  background-position: center top;
+  background-repeat: no-repeat;
+  background-size: 100% auto;
+  transform-origin: 50% 50%;
+  will-change: transform;
+}
+
+/* 움직이는 장면 — 인라인 SVG 가 판을 그대로 채운다.
    ★ SVG 를 배경(background-image)으로 넣으면 SMIL 애니메이션이 돌지 않는다.
      그래서 이 칸만 자식 <svg> 를 직접 늘린다. */
-.art.live { background: none; overflow: hidden; }
-.art.live > svg { display: block; width: 100%; height: 100%; }
+.art.live { background: none; }
+.art.live > .cam > svg { display: block; width: 100%; height: 100%; }
 
 /* 그림이 없는 씬 — 빈 화면 대신 옅은 결을 깔아 준다 */
 .art.empty {
@@ -94,7 +111,29 @@ body {
   white-space: nowrap;      /* 후크는 12자 상한이라 한 줄에 들어간다 */
 }
 .hook .h1 { color: var(--ink); }
-.hook .h2 { color: var(--accent); }
+
+/* ★ 둘째 줄에서 **강조할 낱말만** 주황이다. 예전에는 줄 전체가 주황이라
+   눈이 꽂힐 점이 없었다. `mark` 가 비어 있으면 `<em>` 이 줄 전체를 감싸므로
+   그때는 저절로 줄 전체가 주황이 된다 — 그 꼴도 실제로 쓰인다. */
+.hook .h2 { color: var(--ink); }
+.hook .h2 em { font-style: normal; color: var(--accent); }
+
+/* 고정 후크 — 루트 직속이라 씬이 바뀌어도 그대로 있다. 씬 안의 후크보다
+   위에 있어야 하므로 z-index 를 한 단 올린다. */
+.hookfix { z-index: 4; }
+
+/* 항목 번호 — 고정 후크일 때 씬마다 바뀌는 **유일한 글자**다.
+   진행 레일(top:56px)과 후크(top:96px) 사이를 피해 후크 아래 오른쪽에 둔다. */
+.num {
+  position: absolute;
+  right: 64px; top: 300px;
+  z-index: 5;
+  font-family: "BlackHanSans", "Pretendard", "Malgun Gothic", sans-serif;
+  font-weight: 400;
+  font-size: 64px;
+  line-height: 1;
+  color: var(--accent);
+}
 
 /* 후크 두 번째 줄 아래 밑줄 — GSAP 이 왼→오로 그린다 */
 .hook .rule {
@@ -111,11 +150,16 @@ body {
   left: 72px; right: 72px;
   bottom: 168px;
   z-index: 4;
+  /* ★ 자막은 **크고 굵고 진해야** 한다. 옅은 본문색(--text) 58px 로 굽고
+     보니 숫자가 안 읽혔다(실측: v01 프레임). 잘 도는 쇼츠는 자막이 화면에서
+     가장 센 글자다 — 잉크색으로 올리고 굵기를 한 단 더 준다. */
+  /* 문장 단위 자막이라 세 줄까지 나온다 — 64px 이면 그림칸을 먹는다.
+     아래 띠의 아이보리 그라데이션이 bandBot+110px 을 덮으므로 세 줄은 들어간다. */
   font-size: 58px;
-  font-weight: 700;
-  line-height: 1.30;
-  letter-spacing: -0.018em;
-  color: var(--text);
+  font-weight: 800;
+  line-height: 1.24;
+  letter-spacing: -0.02em;
+  color: var(--ink);
   text-align: center;
   text-wrap: balance;
   /* ★ 한글은 브라우저가 기본으로 **아무 데서나** 줄을 끊는다. 그대로 두면
@@ -123,6 +167,14 @@ body {
      끊고, 한 어절이 한 줄보다 길 때만 break-word 가 받아 준다. */
   word-break: keep-all;
   overflow-wrap: break-word;
+}
+
+/* ★ 자막 안의 **숫자만** 강조색. 「숫자를 읽히게 하는 것」이 목록형의 요점인데
+   숫자가 문장 색과 같으면 그냥 지나간다. 감싸는 것은 코드가 한다
+   (s7_compose._mark_numbers) — 자막 원문에는 태그가 없다. */
+.cc em {
+  font-style: normal;
+  color: var(--accent);
 }
 
 /* 해시태그 — 30초 내내 한 자리에 있다 */

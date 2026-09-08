@@ -69,9 +69,17 @@ class Group:
 
 STAGES: List[Stage] = [
     Stage("source",  "재료",      needs=(),
+          invalidates=("draft", "structure", "script", "speech", "tts", "subs",
+                       "artspec", "art", "compose", "build")),
+    # 재료를 갈아 내는 두 단계. 줄글 덩어리를 바로 대본에 넘기면 대본이 첫 단락만
+    # 잡고 뒷장을 버린다 — 소제목을 복원하고 수치·연표·비교를 표로 뽑아 둔다.
+    Stage("draft",   "원고",      costs=True, needs=("source",),
+          invalidates=("structure", "script", "speech", "tts", "subs", "artspec",
+                       "art", "compose", "build")),
+    Stage("structure", "구조",    needs=("draft",),   # 파서다 — 크레딧을 쓰지 않는다
           invalidates=("script", "speech", "tts", "subs", "artspec",
                        "art", "compose", "build")),
-    Stage("script",  "대본",      costs=True, needs=("source",),
+    Stage("script",  "대본",      costs=True, needs=("structure",),
           invalidates=("speech", "tts", "subs", "artspec", "art",
                        "compose", "build")),
     Stage("speech",  "발음",      needs=("script",),
@@ -97,9 +105,11 @@ BY_KEY: Dict[str, Stage] = {s.key: s for s in STAGES}
 
 GROUPS: List[Group] = [
     Group("plan", "대본 만들기", primary=True,
-          stages=("source", "script", "speech", "tts", "subs", "artspec"),
+          stages=("source", "draft", "structure",
+                  "script", "speech", "tts", "subs", "artspec"),
           screens=("source", "script"),
-          hint="원문에서 대본·음성·자막·장면 지시까지. 대본과 장면 지시가 크레딧을 씁니다."),
+          hint="원문에서 원고·구조를 뽑고 대본·음성·자막·장면 지시까지. "
+               "원고·대본·장면 지시가 크레딧을 씁니다."),
     Group("video", "영상 만들기",
           stages=("art",),
           screens=("art",),
@@ -116,8 +126,8 @@ BY_GROUP: Dict[str, Group] = {g.key: g for g in GROUPS}
 #   「대본」 화면 하나가 탭 다섯 개(대본·발음·음성·자막·장면지시)를 담는다 —
 #   그 다섯은 전부 「대본을 확정하는 일」이고, 오가며 고치는 것이 실제 작업이다.
 SCREENS: List[Screen] = [
-    Screen("source", "재료", ("source",),
-           "장(章) 파일을 넣고 추출본을 손봅니다."),
+    Screen("source", "재료", ("source", "draft", "structure"),
+           "장(章) 파일을 넣고, 원고로 다시 짜고, 수치·연표·비교를 표로 뽑습니다."),
     Screen("script", "대본", ("script", "speech", "tts", "subs", "artspec"),
            "대본을 확정하는 일 전부 — 문구·발음·음성·자막·장면 지시."),
     Screen("art", "장면 제작", ("art",),
@@ -164,6 +174,17 @@ def state(slug: str) -> Dict[str, str]:
 
     if paths.source_md(slug).exists():
         out["source"] = "done"
+    if paths.draft_html(slug).exists():
+        out["draft"] = "done"
+    st = paths.structure_json(slug)
+    if st.exists():
+        try:
+            doc_st = json.loads(st.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            doc_st = {}
+        # 표나 사실이 하나도 없으면 「됐다」고 말하지 않는다 — 파일만 있고 속이 비면
+        # 대본이 근거 없이 쓰게 되고, 그게 지금 고치려는 그 문제다.
+        out["structure"] = "done" if (doc_st.get("facts") or doc_st.get("tables")) else "part"
     if n:
         out["script"] = "done"
 
@@ -207,6 +228,16 @@ def stale(slug: str) -> List[str]:
 
     sj = mtime(paths.script_json(slug))
     out: List[str] = []
+    # 재료 → 원고 → 구조 → 대본. 앞이 새로우면 뒤는 다시 돌려야 한다.
+    src = mtime(paths.source_md(slug))
+    dr = mtime(paths.draft_html(slug))
+    stj = mtime(paths.structure_json(slug))
+    if dr and src > dr + 1:
+        out.append("draft")
+    if stj and dr > stj + 1:
+        out.append("structure")
+    if sj and stj > sj + 1:
+        out.append("script")
     comp = mtime(paths.comp_dir(slug) / "index.html")
     if comp and sj > comp + 1:
         out.append("compose")

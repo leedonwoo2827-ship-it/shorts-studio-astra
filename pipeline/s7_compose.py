@@ -306,6 +306,22 @@ def phase_svg(svg: str, start: float) -> tuple:
     return _ANIM_TAG.sub(fix, svg), stat
 
 
+# 자막 안의 숫자를 강조색으로 올린다. 「숫자를 읽히게 하는 것」이 목록형의
+# 요점인데, 숫자가 문장과 같은 색이면 그냥 지나간다.
+#
+# ★ **이스케이프 뒤에** 부른다. 숫자와 뒤따르는 단위만 잡으므로 `<em>` 이
+#   본문으로 새지 않는다. 한글 수사(스물·백)는 안 잡는다 — 자막에는 아라비아
+#   숫자가 오고, 발음 변환본(narration_text)에만 한글 수사가 들어간다.
+_NUM_RUN = re.compile(
+    r"\d[\d,.]*\s*(?:퍼센트|%|만\s*명|억\s*명|천\s*명|만|억|천|명|년|배|원|개|쪽|"
+    r"페니|파운드|달러)?")
+
+
+def _mark_numbers(esc: str) -> str:
+    """이미 이스케이프된 자막 한 줄에서 숫자 덩어리를 `<em>` 으로 감싼다."""
+    return _NUM_RUN.sub(lambda m: f"<em>{m.group(0)}</em>", esc)
+
+
 def run(slug: str, *, on_log: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
     log = on_log or (lambda _m: None)
     doc = _load(slug)
@@ -323,6 +339,18 @@ def run(slug: str, *, on_log: Optional[Callable[[str], None]] = None) -> Dict[st
     art_h = int(round(width * ART_RATIO))
 
     have_art = s6_art.present(slug)
+
+    # ── 두루마리 카메라 ───────────────────────────────────────────────────
+    # 장면 지시가 칸과 카메라를 담고 있다. 카메라 시각은 **씬 기준**이라
+    # 여기서 문서 기준으로 옮긴다 — SMIL 위상을 맞추는 것과 같은 이유다.
+    spec: Dict[int, Dict[str, Any]] = {}
+    sp = paths.art_spec(slug)
+    if sp.exists():
+        try:
+            for r in (json.loads(sp.read_text(encoding="utf-8")).get("scenes") or []):
+                spec[int(r.get("no") or 0)] = r
+        except Exception:  # noqa: BLE001
+            spec = {}
 
     # ── 타이밍 ────────────────────────────────────────────────────────────
     scenes: List[Dict[str, Any]] = []
@@ -343,8 +371,27 @@ def run(slug: str, *, on_log: Optional[Callable[[str], None]] = None) -> Dict[st
         for cue in (s.get("cues") or []):
             cues.append({"start": round(start + float(cue["t"]), 3),
                          "dur": round(float(cue["d"]), 3),
-                         "text": _esc(cue["text"])})
+                         "text": _mark_numbers(_esc(cue["text"]))})
 
+        r = spec.get(no) or {}
+        cells_n = max(1, len(r.get("cells") or []) or 1)
+
+        # ★ 카메라를 **여기서 다시 만든다.** 장면지시에 저장된 것을 쓰지 않는다.
+        #   카메라는 자막 큐 경계에서 나오는 결정론 값이라, 사람이 자막을 고치면
+        #   큐가 바뀌고 저장된 카메라는 그 순간 낡는다. 다시 계산하면 **자막만
+        #   고쳐도 컷이 따라오고**, 장면 지시($)를 다시 돌릴 이유가 없어진다.
+        #   칸 그림(`cells`)만 모델의 것이고 타이밍은 전부 코드의 것이다.
+        from .s5_artspec import make_camera
+        shots = []
+        for x in make_camera(s.get("cues") or [], cells_n, audio_sec):
+            at = float(x.get("at") or 0.0)
+            if at > audio_sec + 0.01:
+                continue                  # 소리보다 늦은 컷은 안 보인다
+            cell = max(1, min(cells_n, int(x.get("cell") or 1)))
+            shots.append({"at": round(start + at, 3),
+                          "y": -(cell - 1) * art_h,
+                          "move": str(x.get("move") or "뛰기")})
+        animated = bool(have_art.get(no) and s6_art.is_animated(have_art[no]))
         scenes.append({
             "no": no,
             "role": s.get("role") or "body",
@@ -354,10 +401,16 @@ def run(slug: str, *, on_log: Optional[Callable[[str], None]] = None) -> Dict[st
             "hook_line1": _esc(s.get("hook_line1") or ""),
             "hook_line2": _esc(s.get("hook_line2") or ""),
             "art": have_art.get(no),
-            "animated": bool(have_art.get(no) and s6_art.is_animated(have_art[no])),
-            "kb": _kenburns(i, dur),
+            "animated": animated,
+            "cells_n": cells_n,
+            "cam_h": art_h * cells_n,
+            "camera": shots,
+            # 켄번스는 **칸이 하나인 정지 그림에만** 남긴다. 두루마리는 카메라가
+            # 이미 움직이므로 둘을 겹치면 두 움직임이 싸워 둘 다 안 읽힌다.
+            "kb": _kenburns(i, dur) if (cells_n == 1 and not animated) else None,
             "accent": _accent(i, s.get("role") or "body", start, dur,
-                              width, height, band_top, band_bottom),
+                              width, height, band_top, band_bottom)
+                      if (cells_n == 1 and not animated) else None,
         })
         clock += dur
 
@@ -422,10 +475,37 @@ def run(slug: str, *, on_log: Optional[Callable[[str], None]] = None) -> Dict[st
         else:
             sc["audio_sec"] = 0.0          # 소리가 없으면 audio 태그를 내지 않는다
 
+    # ── 고정 후크 ─────────────────────────────────────────────────────────
+    # 영상 내내 상단에 박혀 있다. 씬마다 갈리면 보다 들어온 사람이 무슨
+    # 영상인지 모른다 — 잘 도는 쇼츠 넷 중 셋이 고정이었다.
+    # `mark` 는 둘째 줄 **안에 그대로 있는** 낱말이라 셋으로 쪼갠다.
+    # 비어 있으면 줄 전체가 강조색이 된다(그 꼴도 실제로 쓰인다).
+    hf = doc.get("hook_fixed") or {}
+    fixed = None
+    if (hf.get("line1") or "").strip():
+        line2 = str(hf.get("line2") or "")
+        mark = str(hf.get("mark") or "")
+        if mark and mark in line2:
+            head_, _, tail_ = line2.partition(mark)
+            parts = {"pre": _esc(head_), "mark": _esc(mark), "post": _esc(tail_)}
+        else:
+            parts = {"pre": "", "mark": _esc(line2), "post": ""}
+        fixed = {"line1": _esc(str(hf.get("line1"))), **parts}
+
+    # 항목 번호 — 씬마다 바뀌는 유일한 글자. 8개까지다(씬 상한과 같다).
+    _CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩"
+    if fixed:
+        for i, sc in enumerate(scenes):
+            sc["num"] = _CIRCLED[i] if i < len(_CIRCLED) else ""
+
     screen_text = "".join(
         [str(doc.get("title") or ""), " ".join(doc.get("hashtags") or [])]
         + [s["hook_line1"] + s["hook_line2"] for s in scenes]
         + [q["text"] for q in cues]
+        # ★ 고정 후크와 항목 번호를 반드시 더한다. 빠뜨리면 그 글자만
+        #   맑은고딕으로 떨어져 화면에서 홀로 다른 폰트가 된다.
+        + ([fixed["line1"] + fixed["pre"] + fixed["mark"] + fixed["post"],
+            _CIRCLED] if fixed else [])
     )
     _subset_fonts(out / "assets" / "fonts", screen_text, on_log=log)
 
@@ -441,11 +521,17 @@ def run(slug: str, *, on_log: Optional[Callable[[str], None]] = None) -> Dict[st
         sub_ink=c.get("sub_ink", "#9DC3E6"),
         theme_css=(TEMPLATE_DIR / "theme.css").read_text(encoding="utf-8"),
         scenes=scenes, cues=cues,
+        hook_fixed=fixed,
         hashtags=_esc("  ".join(doc.get("hashtags") or [])),
     )
     (out / "index.html").write_text(html, encoding="utf-8", newline="\n")
 
-    log(f"  씬 {len(scenes)} · 자막 큐 {len(cues)} · 소리 {audio_n} · 총 {total:.2f}초")
+    cuts_n = sum(len(sc.get("camera") or []) for sc in scenes)
+    log(f"  씬 {len(scenes)} · 두루마리 칸 {sum(sc['cells_n'] for sc in scenes)} · "
+        f"컷 {cuts_n} · 자막 큐 {len(cues)} · 소리 {audio_n} · 총 {total:.2f}초")
+    if fixed:
+        log(f"  고정 후크 「{hf.get('line1')} / {hf.get('line2', '')}」"
+            + (f" · 강조 「{hf['mark']}」" if hf.get("mark") else " · 둘째 줄 전체"))
     return {"dir": str(out), "total_sec": total, "scenes": len(scenes),
             "cues": len(cues), "audio": audio_n,
             "art": sorted(have_art), "fps": fps,

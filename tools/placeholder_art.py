@@ -14,6 +14,11 @@
 ★ 비운 칸의 경계를 옅은 선으로 그려 준다. 진짜 그림이 그 선을 넘었는지
   비교해 볼 기준이 된다.
 
+★ **두루마리를 흉내낸다.** 장면 지시에 칸이 여러 개면 그만큼 **세로로 긴**
+  자리표시를 만들고 칸마다 다른 무늬를 넣는다. 그래야 카메라가 칸에서 칸으로
+  뛰는 것이 크레딧 0원으로 눈에 보인다 — 이게 이 도구의 가장 중요한 쓸모다.
+  칸이 하나면 예전과 똑같은 한 장이 나온다.
+
 ffmpeg 만 쓴다(이미 필수 준비물이다). 이미지 라이브러리를 더 깔지 않는다.
 """
 from __future__ import annotations
@@ -123,24 +128,53 @@ def main() -> int:
     ink = config.get("compose.ink", "#1F4E79").lstrip("#")
     sub = config.get("compose.sub_ink", "#9DC3E6").lstrip("#")
 
+    # 장면 지시가 있으면 칸 수를 읽는다. 없으면 한 칸(예전과 같음).
+    cells: dict = {}
+    sp = paths.art_spec(a.slug)
+    if sp.exists():
+        try:
+            for r in (json.loads(sp.read_text(encoding="utf-8")).get("scenes") or []):
+                cells[int(r.get("no") or 0)] = max(1, len(r.get("cells") or []) or 1)
+        except Exception:  # noqa: BLE001
+            cells = {}
+
     out_dir = paths.art_dir(a.slug)
     out_dir.mkdir(parents=True, exist_ok=True)
     made = []
     for s in scenes:
         no = int(s.get("no") or 0)
+        nc = cells.get(no, 1)
         dst = out_dir / f"{no:03d}.png"
         if dst.exists() and not a.force:
             print(f"  {dst.name} 이미 있음 — 건너뜀 (--force 로 덮어쓰기)")
             continue
-        vf = _filters(no, w, h, top, bot, ivory, f"0x{ink}", f"0x{sub}")
-        cmd = ["ffmpeg", "-y", "-loglevel", "error",
-               "-f", "lavfi", "-i", f"color=c=0x{ivory}:s={w}x{h}",
-               "-vf", vf, "-frames:v", "1", str(dst)]
+        # 칸마다 다른 무늬. 무늬 번호를 씬·칸으로 굴려 옆 칸과 안 같게 한다.
+        parts = []
+        for k in range(nc):
+            parts.append(_filters(no + k, w, h, top, bot, ivory,
+                                  f"0x{ink}", f"0x{sub}"))
+        if nc == 1:
+            cmd = ["ffmpeg", "-y", "-loglevel", "error",
+                   "-f", "lavfi", "-i", f"color=c=0x{ivory}:s={w}x{h}",
+                   "-vf", parts[0], "-frames:v", "1", str(dst)]
+        else:
+            # 칸을 위아래로 이어 붙인다 — vstack 이 두루마리를 만든다.
+            cmd = ["ffmpeg", "-y", "-loglevel", "error"]
+            for _ in range(nc):
+                cmd += ["-f", "lavfi", "-i", f"color=c=0x{ivory}:s={w}x{h}"]
+            chain = "".join(f"[{k}:v]{parts[k]}[c{k}];" for k in range(nc))
+            chain += "".join(f"[c{k}]" for k in range(nc))
+            chain += f"vstack=inputs={nc}[v]"
+            cmd += ["-filter_complex", chain, "-map", "[v]",
+                    "-frames:v", "1", str(dst)]
         subprocess.run(cmd, check=True)
         made.append(dst.name)
-        print(f"  {dst.name} ({w}x{h}, 위 {top}px / 아래 {bot}px 비움)")
+        print(f"  {dst.name} ({w}x{h * nc}, 칸 {nc}개, 칸마다 위 {top}px / "
+              f"아래 {bot}px 비움)")
 
     print(f"자리표시 {len(made)}장. 이제 「컴포지션」→「빌드」를 돌려 보세요.")
+    if any(v > 1 for v in cells.values()):
+        print("칸이 여러 개인 씬이 있습니다 — 미리보기에서 카메라가 칸을 뛰는지 보세요.")
     print("아스트라 장면(001.svg)을 받으면 그쪽이 자동으로 우선합니다.")
     return 0
 

@@ -241,8 +241,14 @@ PAGES.home = async (m) => {
   const file = Object.assign(document.createElement("input"), { type: "file", accept: ".pdf,.docx,.md,.txt,.html,.htm" });
   const title = Object.assign(document.createElement("input"), { type: "text", placeholder: "제목 (비우면 파일 이름)" });
   title.className = "grow";
-  const cuts = Object.assign(document.createElement("input"), { type: "number", min: 1, max: 8, value: (S.cfg?.shorts?.cuts ?? 3) });
-  cuts.style.width = "72px";
+  /* ★ 씬 수를 묻지 않는다. 예전에 여기 「컷」 숫자칸이 있었고, 그 값이
+   *   프롬프트에 「씬 수는 N개다」로 박혀 원문이 18쪽이든 2쪽이든 대본이
+   *   N 으로 맞춰 나왔다. 이제 재료가 정한다. 사람이 고르는 것은 형식뿐이다. */
+  const fmt = document.createElement("select");
+  [["narrative", "서사형"], ["listicle", "목록형"]].forEach(([v, t]) => {
+    const o = document.createElement("option"); o.value = v; o.textContent = t; fmt.appendChild(o);
+  });
+  fmt.value = S.cfg?.shorts?.format ?? "narrative";
   const mk = el("button", "btn primary", "만들기");
   mk.type = "button";
   mk.onclick = async () => {
@@ -250,16 +256,17 @@ PAGES.home = async (m) => {
     const fd = new FormData();
     fd.append("file", file.files[0]);
     fd.append("title", title.value);
-    fd.append("cuts", cuts.value);
+    fd.append("fmt", fmt.value);
     mk.disabled = true;
     try {
       const r = await api("/api/projects", { method: "POST", body: fd });
       S.slug = r.slug; await loadProject(r.slug); go("source");
     } catch (e) { alert(e.message); } finally { mk.disabled = false; }
   };
-  r1.append(file, title, el("span", null, "컷"), cuts, mk);
+  r1.append(file, title, el("span", null, "형식"), fmt, mk);
   nc.appendChild(r1);
-  nc.appendChild(el("div", "hint", `컷 하나가 씬 하나이고 그림 한 장이 붙습니다. 지금 예산은 ${S.cfg?.budget_chars ?? "?"}자 (${S.cfg?.shorts?.seconds ?? 30}초 · ${S.cfg?.narration?.speed ?? 1.2}배속).`));
+  const sh = S.cfg?.shorts || {};
+  nc.appendChild(el("div", "hint", `씬 수는 재료가 정합니다 — 사실 하나에 씬 하나이고, 상한은 ${sh.cuts_max ?? 8}개입니다. 지금 예산은 ${S.cfg?.budget_chars ?? "?"}자 (${sh.seconds_min ?? 20}~${sh.seconds_max ?? 30}초 · ${S.cfg?.narration?.speed ?? 1.2}배속).`));
   m.appendChild(nc);
 
   const lc = card("만들던 것");
@@ -284,26 +291,125 @@ PAGES.home = async (m) => {
 /* 재료 — 원본 → source.md, 사람이 고칠 수 있다 */
 PAGES.source = async (m) => {
   const p = S.proj;
-  m.appendChild(head("재료", "조판된 책 PDF 는 쪽번호·머리글이 본문 한가운데 섞입니다. 여기서 걷어낸 뒤 고치세요."));
-  const c = card("원본", `${p.meta.file || "(없음)"} · ${p.meta.cuts || 3}컷 · 목소리 ${p.meta.voice || "F2"}`);
-  c.appendChild(row(runBtn("source", "다시 추출")));
-  m.appendChild(c);
+  const enc = encodeURIComponent(S.slug);
+  m.appendChild(head("재료",
+    "줄글 한 덩어리를 바로 대본에 넘기면 대본이 첫 단락만 잡고 뒷장을 버립니다. "
+    + "여기서 소제목을 복원하고 수치를 표로 세워 둡니다."));
 
-  const c2 = card("source.md", "이 글이 대본의 유일한 근거입니다. 잘못 붙은 줄이 있으면 지금 고치세요 — 고치면 대본이 달라집니다.");
-  const ta = document.createElement("textarea");
-  ta.rows = 20;
-  ta.value = await api(`/api/projects/${encodeURIComponent(S.slug)}/markdown`);
+  m.appendChild(tabs("source", ["source", "draft", "structure"], {
+
+    /* 1 추출 — 원본 → source.md */
+    source: (b) => {
+      const c = card("원본",
+        `${p.meta.file || "(없음)"} · 형식 ${p.meta.format === "listicle" ? "목록형" : "서사형"}`
+        + ` · 목소리 ${p.meta.voice || "F2"}`);
+      c.appendChild(row(runBtn("source", "다시 추출")));
+      b.appendChild(c);
+
+      const c2 = card("source.md",
+        "조판된 책 PDF 는 쪽번호·머리글이 본문 한가운데 섞입니다. 걷어낸 뒤 고치세요.");
+      const ta = document.createElement("textarea");
+      ta.rows = 18;
+      ta.value = "불러오는 중…";
+      api(`/api/projects/${enc}/markdown`).then((t) => { ta.value = t; });
+      c2.appendChild(ta);
+      c2.appendChild(row(saveBtn(`/api/projects/${enc}/markdown`, ta)));
+      b.appendChild(c2);
+    },
+
+    /* 2 원고 — 소제목 복원 + 수치를 표로 */
+    draft: (b) => {
+      const dr = p.draft;
+      const c = card("원고 HTML",
+        "절(h2)을 복원하고, 수치·연표·비교를 표로, 추세·대비를 도해 골격으로 세웁니다.");
+      if (dr) {
+        c.appendChild(row(
+          el("span", "pill", `절 ${dr.sections}개`),
+          el("span", "pill" + (dr.tables ? " ok" : " warn"), `표 ${dr.tables}개`),
+          el("span", "pill", `골격 ${dr.skeletons}개`),
+          el("span", "pill", `${(dr.chars || 0).toLocaleString()}자`),
+          dr.cost_usd ? el("span", "pill", `$${dr.cost_usd.toFixed(2)}`) : null,
+        ));
+        (dr.warnings || []).forEach((w) => c.appendChild(el("div", "note", w)));
+      }
+      c.appendChild(row(runBtn("draft", "원고 다시 짜기")));
+      b.appendChild(c);
+
+      const c2 = card("고치는 자리",
+        "소제목이 본문에 붙어 왔으면 여기서 떼세요. 고친 뒤 「구조」를 다시 돌려야 표가 갱신됩니다.");
+      const ta = document.createElement("textarea");
+      ta.rows = 22;
+      ta.spellcheck = false;
+      ta.value = "불러오는 중…";
+      api(`/api/projects/${enc}/draft`).then((t) => { ta.value = t || "(아직 없음)"; });
+      c2.appendChild(ta);
+      c2.appendChild(row(saveBtn(`/api/projects/${enc}/draft`, ta)));
+      b.appendChild(c2);
+    },
+
+    /* 3 구조 — 파서. 크레딧 0 */
+    structure: (b) => {
+      const c = card("구조 뽑기",
+        "원고의 태그를 읽어 절·블록·표·골격·사실을 목록으로 만듭니다. "
+        + "모델을 부르지 않으니 **크레딧이 들지 않습니다** — 몇 번이든 돌려도 됩니다.");
+      c.appendChild(row(runBtn("structure", "구조 다시 뽑기")));
+      b.appendChild(c);
+
+      const c2 = card("사실 — 대본이 여기서 골라 씁니다");
+      const pre = Object.assign(el("pre", "out"), { textContent: "불러오는 중…" });
+      api(`/api/projects/${enc}/structure`)
+        .then((j) => {
+          if (!j || !(j.facts || []).length) {
+            pre.textContent = "(아직 없음)\n\n사실이 하나도 없으면 대본이 근거 없이 씁니다 — "
+              + "원고에 표가 있는지 보세요.";
+            (j?.warnings || []).forEach((w) => c2.appendChild(el("div", "note", w)));
+            return;
+          }
+          const lines = [];
+          lines.push(`절 ${(j.sections || []).length}개 · 블록 ${(j.blocks || []).length}개 · `
+            + `표 ${(j.tables || []).length}개 · 골격 ${(j.skeletons || []).length}개 · `
+            + `사실 ${(j.facts || []).length}개`);
+          lines.push("");
+          j.facts.forEach((f) => {
+            lines.push(`${f.id.padEnd(5)}[${f.kind}] ${f.label} = ${f.value}${f.unit}`
+              + (f.year ? ` (${f.year}년)` : ""));
+            if (f.quote) lines.push(`     근거: ${f.quote.slice(0, 80)}`);
+          });
+          if ((j.tables || []).length) {
+            lines.push("", "── 표 ──");
+            j.tables.forEach((t) => {
+              lines.push(`${t.id}  ${(t.head || []).join(" / ")}`);
+              (t.rows || []).forEach((r) => lines.push(`     ${r.join(" · ")}`));
+            });
+          }
+          if ((j.skeletons || []).length) {
+            lines.push("", "── 도해 골격 ──");
+            j.skeletons.forEach((k) => lines.push(`${k.id}  [${k.kind}] ${k.aria || ""}`));
+          }
+          pre.textContent = lines.join("\n");
+          (j.warnings || []).forEach((w) => c2.appendChild(el("div", "note", w)));
+        })
+        .catch(() => { pre.textContent = "(아직 없음)"; });
+      c2.appendChild(pre);
+      b.appendChild(c2);
+    },
+  }));
+};
+
+/* 저장 단추 — 원본·원고 두 탭이 같은 부품을 쓴다 */
+function saveBtn(url, ta) {
   const save = el("button", "btn", "저장");
   save.type = "button";
   save.onclick = async () => {
     save.disabled = true;
-    try { const r = await put(`/api/projects/${encodeURIComponent(S.slug)}/markdown`, ta.value, true); save.textContent = `저장됨 (${r.chars.toLocaleString()}자)`; }
-    catch (e) { alert(e.message); } finally { setTimeout(() => { save.textContent = "저장"; save.disabled = false; }, 1400); }
+    try {
+      const r = await put(url, ta.value, true);
+      save.textContent = `저장됨 (${(r.chars || 0).toLocaleString()}자)`;
+    } catch (e) { alert(e.message); }
+    finally { setTimeout(() => { save.textContent = "저장"; save.disabled = false; }, 1400); }
   };
-  c2.appendChild(ta);
-  c2.appendChild(row(save));
-  m.appendChild(c2);
-};
+  return save;
+}
 
 /* 씬 편집 — 발음 탭과 자막 탭이 같은 부품을 쓴다. **사람 손이 이긴다.**
  * ★ 고친 값은 `overrides` 가 아니라 script.json 에 바로 들어가고, 서버가 자막
@@ -433,14 +539,23 @@ PAGES.script = (m) => {
         d.cost_usd ? el("span", "pill", `$${d.cost_usd.toFixed(2)}`) : null,
       ));
       (d.warnings || []).forEach((w) => c.appendChild(el("div", "note", w)));
-      const cuts = Object.assign(document.createElement("input"),
-        { type: "number", min: 1, max: 8, value: (d.cuts || p.meta.cuts || 3) });
-      cuts.style.width = "72px";
+      /* 형식만 고른다. 씬 수는 재료가 정한다. */
+      const fmt = document.createElement("select");
+      [["narrative", "서사형"], ["listicle", "목록형"]].forEach(([v, t]) => {
+        const o = document.createElement("option"); o.value = v; o.textContent = t; fmt.appendChild(o);
+      });
+      fmt.value = d.format || p.meta.format || S.cfg?.shorts?.format || "narrative";
       const rb = runBtn("script", "대본 다시 쓰기");
-      rb.onclick = () => runStage("script", { cuts: Number(cuts.value) });
-      c.appendChild(row(el("span", null, "씬"), cuts, rb));
+      rb.onclick = () => runStage("script", { fmt: fmt.value });
+      c.appendChild(row(el("span", null, "형식"), fmt, rb));
       c.appendChild(el("div", "hint",
-        "씬 하나가 아스트라 2분 30초입니다 — 씬 수가 곧 비용입니다."));
+        "씬 수는 재료가 정합니다 — 사실 하나에 씬 하나입니다. "
+        + "씬 하나가 아스트라 2분 30초이므로 상한만 둡니다."));
+      if (d.hook_fixed?.line1) {
+        c.appendChild(el("div", "hint",
+          `고정 후크 「${d.hook_fixed.line1} / ${d.hook_fixed.line2 || ""}」`
+          + (d.hook_fixed.mark ? ` · 강조 「${d.hook_fixed.mark}」` : " · 둘째 줄 전체 강조")));
+      }
       b.appendChild(c);
       if (d.scenes) b.appendChild(sceneEditor(d, { showSource: true }));
     },
@@ -518,10 +633,22 @@ PAGES.script = (m) => {
         .then((j) => {
           if (!j || !j.scenes || !j.scenes.length) { pre.textContent = "(아직 없음)"; return; }
           pre.textContent = j.scenes.map((r) => [
-            `씬 ${r.no} (${r.role || "body"}) · 화면 ${r.scene_sec ?? r.sec}초 · 동작은 ${r.sec}초 안에`,
+            `씬 ${r.no} (${r.role || "body"}) · 화면 ${r.scene_sec ?? r.sec}초 · 동작은 ${r.sec}초 안에`
+              + (r.canvas_h ? ` · 두루마리 ${r.canvas_h}px (${(r.cells || []).length}칸)` : ""),
+            /* ★ 주장을 맨 위에 놓는다. 예전 이 자리는 `r.motion` 을 읽었는데
+             *   그건 v1 필드였다 — 스키마 v2 는 claim/change/beats 를 쓰므로
+             *   화면이 **주장을 통째로 안 보여 주고** 있었다. */
+            `  주장 : ${r.claim || "(없음)"}`,
+            r.fact ? `  사실 : ${r.fact}` : "",
             `  장면 : ${r.stage}`,
             `  배치 : ${r.layout}`,
-            ...(r.motion || []).map((x, i) => `  동작${i + 1}: ${x}`),
+            `  변동 : ${r.change || ""}`,
+            ...(r.cells || []).map((c) => `  칸${c.no} [${c.fill || ""}] ${c.what || ""}`),
+            ...(r.beats || []).map((x) => `  박자 ${x.at}~${x.until}초 : ${x.what}`),
+            (r.camera || []).length
+              ? "  카메라 : " + r.camera.map((x) => `${x.at}초 칸${x.cell}(${x.move})`).join(" → ")
+              : "",
+            r.support ? `  거듦 : ${r.support}` : "",
             r.palette_note ? `  색   : ${r.palette_note}` : "",
           ].filter(Boolean).join("\n")).join("\n\n");
           (j.warnings || []).forEach((w) => c2.appendChild(el("div", "note", w)));
@@ -728,7 +855,22 @@ async function chips() {
 }
 
 /* ── 시작 ─────────────────────────────────────────────────────────────── */
-$("#rail-toggle").onclick = () => document.body.classList.toggle("rail-off");
+$("#rail-toggle").onclick = () => railToggle();
+
+/* 레일 접기/펴기. 단추 설명도 같이 바꾼다 — 접힌 채로 「접기」라고 적혀 있으면
+   무엇을 누르는지 알 수 없다. */
+function railToggle() {
+  const off = document.body.classList.toggle("rail-off");
+  const b = $("#rail-toggle");
+  if (b) b.title = off ? "레일 펴기 (Ctrl+B)" : "레일 접기 (Ctrl+B)";
+}
+
+/* 글을 쓰는 칸에서는 Ctrl+B 를 가로채지 않는다. 원고·자막 textarea 에서
+   굵게 하려고 누른 것이 레일을 접어 버렸다 — 그게 「가끔 안 펴진다」의 정체다. */
+function typing(t) {
+  const n = (t && t.tagName || "").toLowerCase();
+  return n === "textarea" || n === "input" || n === "select" || (t && t.isContentEditable);
+}
 $("#dock-toggle").onclick = (e) => {
   if (e.target.id === "dock-stop") return;
   document.body.classList.toggle("dock-min");
@@ -738,8 +880,8 @@ $("#dock-stop").onclick = async (e) => {
   if (S.job) { try { await post(`/api/jobs/${S.job.job_id}/cancel`); } catch (_) { /* 이미 끝났으면 무시 */ } }
 };
 document.addEventListener("keydown", (e) => {
-  if (e.ctrlKey && e.key.toLowerCase() === "b") { e.preventDefault(); document.body.classList.toggle("rail-off"); }
-  if (e.ctrlKey && e.key.toLowerCase() === "j") { e.preventDefault(); document.body.classList.toggle("dock-min"); }
+  if (e.ctrlKey && e.key.toLowerCase() === "b" && !typing(e.target)) { e.preventDefault(); railToggle(); }
+  if (e.ctrlKey && e.key.toLowerCase() === "j" && !typing(e.target)) { e.preventDefault(); document.body.classList.toggle("dock-min"); }
 });
 
 (async function boot() {

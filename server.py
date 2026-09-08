@@ -130,7 +130,12 @@ def create_app() -> FastAPI:
     @app.post("/api/projects")
     async def new_project(file: UploadFile = File(...),
                           title: str = Form(""),
-                          cuts: int = Form(0)) -> Dict[str, Any]:
+                          fmt: str = Form("")) -> Dict[str, Any]:
+        """새 프로젝트. **씬 수를 받지 않는다** — 형식만 받고 나머지는 파생값이다.
+
+        예전에는 여기서 `cuts` 를 받아 프롬프트에 「씬 수는 N개다」로 박았고,
+        그러면 원문이 18쪽이든 2쪽이든 대본이 N 으로 맞춰 나왔다.
+        """
         name = Path(file.filename or "원본").name
         t = (title or Path(name).stem).strip()
         slug = paths.slugify(t)
@@ -139,7 +144,7 @@ def create_app() -> FastAPI:
         dst.write_bytes(await file.read())
         atomic_write_json(str(paths.source_json(slug)), {
             "file": name, "title": t,
-            "cuts": int(cuts or config.get("shorts.cuts", 3)),
+            "format": (fmt or config.get("shorts.format", "narrative")).strip(),
             "voice": config.get("narration.voice", "F2"),
             "speed": config.get("narration.speed", 1.2),
         }, indent=2)
@@ -165,6 +170,11 @@ def create_app() -> FastAPI:
             "stages": table["stages"],
             "source_chars": (paths.source_md(slug).stat().st_size
                              if paths.source_md(slug).exists() else 0),
+            # 「재료」 화면의 원고·구조 탭이 쓰는 요약. 본문은 각자 라우트로 받는다 —
+            # 원고 HTML 은 십만 자가 넘을 수 있어 이 응답에 담지 않는다.
+            "draft": (json.loads((paths.plan_dir(slug) / "원고.json")
+                                 .read_text(encoding="utf-8"))
+                      if (paths.plan_dir(slug) / "원고.json").exists() else None),
             "art": runner.s6_art.present(slug),
             "build": ({"name": build.name,
                        "youtube": (build / "유튜브.txt").read_text(encoding="utf-8")
@@ -257,6 +267,29 @@ def create_app() -> FastAPI:
         text = (await request.body()).decode("utf-8")
         atomic_write_text(str(paths.source_md(slug)), text)
         return {"chars": len(text)}
+
+    @app.get("/api/projects/{slug}/draft", response_class=PlainTextResponse)
+    def get_draft(slug: str) -> str:
+        """원고 HTML. 소제목이 잘못 붙었으면 사람이 여기서 고친다."""
+        _need(slug)
+        p = paths.draft_html(slug)
+        return p.read_text(encoding="utf-8") if p.exists() else ""
+
+    @app.put("/api/projects/{slug}/draft")
+    async def put_draft(slug: str, request: Request) -> Dict[str, Any]:
+        """고친 원고를 저장한다. **「구조」를 다시 돌려야** 사실 표가 갱신된다 —
+        `stages.stale()` 이 mtime 을 보고 화면에 그렇게 알려 준다."""
+        _need(slug)
+        text = (await request.body()).decode("utf-8")
+        atomic_write_text(str(paths.draft_html(slug)), text)
+        return {"chars": len(text)}
+
+    @app.get("/api/projects/{slug}/structure")
+    def get_structure(slug: str) -> Dict[str, Any]:
+        """구조. 「재료 → 구조」 탭이 사실 표를 보여 준다."""
+        _need(slug)
+        p = paths.structure_json(slug)
+        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
 
     @app.put("/api/projects/{slug}/scenes")
     async def put_scenes(slug: str, request: Request) -> Dict[str, Any]:

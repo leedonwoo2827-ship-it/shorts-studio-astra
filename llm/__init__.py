@@ -16,12 +16,27 @@ from .claude_provider import ClaudeProvider, find_cli, status  # noqa: F401
 from .errors import NotAuthenticated, ProviderError, QuotaExceeded  # noqa: F401
 
 
+def budget_for(stage: str) -> float:
+    """이 단계에 허용할 돈. `budget_usd.<단계>` 가 있으면 그것이 이긴다.
+
+    ★ 단계마다 드는 값이 다르다. 실측(2026-09-08): 「원고」 단계는 16,212자를
+      읽고 HTML 원고를 통째로 써 내므로 출력 토큰이 커서 공통 상한 $1.5 를
+      **넘겨 죽었다**(`Reached maximum budget`). 반면 「자막」·「결과」는 훨씬
+      싸다. 공통 상한 하나로 묶으면 비싼 단계가 못 돌거나 싼 단계에 과한 여유를
+      준다 — 그래서 단계별로 덮을 수 있게 둔다.
+    """
+    v = config.get(f"budget_usd.{stage}")
+    if v is None:
+        v = config.get("budget_usd.per_stage", 1.5)
+    return float(v)
+
+
 def provider(stage: str, *, on_activity=None) -> ClaudeProvider:
     """단계 이름으로 모델·추론강도·예산을 골라 프로바이더를 만든다."""
     return ClaudeProvider(
         model=config.get(f"models.{stage}", "") or "",
         effort=config.get(f"effort.{stage}") or None,
-        budget_usd=float(config.get("budget_usd.per_stage", 1.5)),
+        budget_usd=budget_for(stage),
         on_activity=on_activity,
     )
 

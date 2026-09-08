@@ -75,11 +75,20 @@
                              그림으로만 취급해 **SMIL 이 돌지 않는다**(실측).
               정지 그림      배경으로 깔고 켄번스로 민다.
               없음           옅은 결을 깔아 둔다 — 빈 화면보다 낫다. -#}
+        {#- 카메라 판(`.cam`)이 그림칸(`.art`)보다 크고, 그 판을 밀어 올려
+              칸에서 칸으로 **끊어 뛴다.** 뛰는 것이 컷이다.
+              판을 SVG 밖에 두는 이유: 아스트라가 정지 그림을 줘도 화면은
+              여전히 움직이고, 자리표시(무료)로도 리듬을 시험할 수 있다. -#}
         {%- if sc.animated %}
-        <div id="art{{ '%03d' % sc.no }}" class="art live">{{ sc.svg }}</div>
+        <div id="art{{ '%03d' % sc.no }}" class="art live">
+          <div id="cam{{ '%03d' % sc.no }}" class="cam"
+               style="height:{{ sc.cam_h }}px">{{ sc.svg }}</div>
+        </div>
         {%- elif sc.art %}
-        <div id="art{{ '%03d' % sc.no }}" class="art"
-             style="background-image:url('./assets/{{ sc.art }}')"></div>
+        <div id="art{{ '%03d' % sc.no }}" class="art">
+          <div id="cam{{ '%03d' % sc.no }}" class="cam"
+               style="height:{{ sc.cam_h }}px;background-image:url('./assets/{{ sc.art }}')"></div>
+        </div>
         {%- else %}
         <div id="art{{ '%03d' % sc.no }}" class="art empty"></div>
         {%- endif %}
@@ -89,7 +98,7 @@
         {#- 강조 도형은 **정지 그림에만** 얹는다.
               움직이는 장면 위에 또 고리를 그으면 두 움직임이 싸워서 둘 다 안 읽힌다
               (실측: 아스트라 씬 위에 주황 고리가 겹쳐 장면을 가렸다). -#}
-        {%- if not sc.animated %}
+        {%- if sc.accent %}
         <svg class="accent" viewBox="0 0 {{ width }} {{ height }}"
              xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           {#- 강조는 코드가 정한다(s7_compose._accent). 씬 성격에 따라 고리·화살표·점. -#}
@@ -107,13 +116,31 @@
         </svg>
         {%- endif %}
 
+        {#- 후크는 두 길이다.
+              고정 후크가 있으면 이 씬에는 **항목 번호만** 뜬다 — 영상 내내
+                바뀌지 않는 후크가 루트에 따로 있다.
+              없으면 예전처럼 씬마다 두 줄이 갈린다(서사형). -#}
+        {%- if hook_fixed %}
+        <div class="num" id="nm{{ '%03d' % sc.no }}">{{ sc.num }}</div>
+        {%- else %}
         <div class="hook">
           <div class="h1 line">{{ sc.hook_line1 }}</div>
           <div class="h2 line">{{ sc.hook_line2 }}</div>
           <div class="rule" id="ru{{ '%03d' % sc.no }}"></div>
         </div>
+        {%- endif %}
       </section>
 {% endfor %}
+
+{% if hook_fixed %}
+      {#- 고정 후크 — 루트 직속이라 씬이 바뀌어도 그대로 있다.
+            `mark` 만 강조색이다. 비어 있으면 둘째 줄 전체가 강조색이 된다. -#}
+      <div id="hookfix" class="clip hook hookfix" data-start="0" data-duration="{{ total }}">
+        <div class="h1 line">{{ hook_fixed.line1 }}</div>
+        <div class="h2 line">{{ hook_fixed.pre }}<em>{{ hook_fixed.mark }}</em>{{ hook_fixed.post }}</div>
+        <div class="rule" id="rufix"></div>
+      </div>
+{% endif %}
 
       {#- 진행 레일 — 30초 내내. 칸 하나가 씬 하나다. -#}
       <div id="rail" class="clip rail" data-start="0" data-duration="{{ total }}">
@@ -168,24 +195,56 @@
       // ── 씬 {{ sc.no }} ────────────────────────────────────────────────
       {%- if sc.animated %}
       // ★ 움직이는 장면에는 **켄번스를 걸지 않는다.** 장면이 이미 움직이는데
-      //   판까지 밀면 두 움직임이 싸워서 어지럽다. 아주 옅은 숨만 준다.
-      // 배율 숨조차 주지 않는다. 장면이 스스로 움직이는데 판까지 밀면
-      // 두 움직임이 싸워서 어지럽다. 대신 씬이 뜰 때 짧게 페이드만 준다 —
-      // 하드 컷보다 눈에 부드럽다.
+      //   판까지 밀면 두 움직임이 싸워서 어지럽다. 씬이 뜰 때 짧게 페이드만.
       tl.from("#art{{ '%03d' % sc.no }}",
         { autoAlpha: 0, duration: 0.34, ease: "power1.out" }, {{ sc.start }});
-      {%- else %}
-      // 켄번스. 배율을 1보다 크게 유지해 빈 가장자리를 물지 않는다.
+      {%- elif sc.kb %}
+      // 켄번스 — **칸이 하나인 정지 그림에만.** 배율을 1보다 크게 유지해
+      // 빈 가장자리를 물지 않는다. 두루마리에는 카메라가 이미 걸려 있다.
       tl.fromTo("#art{{ '%03d' % sc.no }}",
         { scale: {{ sc.kb.from }}, x: {{ sc.kb.x0 }}, y: {{ sc.kb.y0 }} },
         { scale: {{ sc.kb.to }}, x: {{ sc.kb.x1 }}, y: {{ sc.kb.y1 }},
           duration: {{ sc.dur }}, ease: "none" },
         {{ sc.start }});
+      {%- else %}
+      tl.from("#art{{ '%03d' % sc.no }}",
+        { autoAlpha: 0, duration: 0.34, ease: "power1.out" }, {{ sc.start }});
       {%- endif %}
 
+      {#- 칸 뛰기 — 카메라. 시각은 **자막 큐 경계**다(s5_artspec.make_camera).
+            그래서 자막 조각과 화면이 같은 순간에 튄다. 따로 두면 둘 다 죽는다.
+            뛰기는 짧고 세게, 좁히기는 같은 칸을 다르게 보여 주는 것이다. -#}
+      {%- for shot in sc.camera %}
+      {%- if loop.first %}
+      tl.set("#cam{{ '%03d' % sc.no }}",
+        { y: {{ shot.y }}, scale: 1, transformOrigin: "50% 50%" }, {{ shot.at }});
+      {%- elif shot.move == '좁히기' %}
+      // 되쓰는 칸 — 같은 그림을 천천히 좁혀 다르게 보여 준다. 칸을 넘지 않으니
+      // 빈 띠가 지나갈 일이 없다.
+      tl.to("#cam{{ '%03d' % sc.no }}",
+        { y: {{ shot.y }}, scale: 1.12, duration: 0.7, ease: "power1.inOut" },
+        {{ shot.at }});
+      {%- else %}
+      // ★ 칸 뛰기는 **즉시**다. `tl.to` 로 0.22초 밀어 봤더니, 칸마다 위아래 15%
+      //   가 비어 있어서 **빈 아이보리 30% 가 화면을 훑고 지나갔다**(실측:
+      //   v01 1.18초 프레임). 컷은 슬라이드가 아니라 갈리는 것이다 —
+      //   `tl.set` 이면 빈 띠가 한 프레임도 안 보인다.
+      tl.set("#cam{{ '%03d' % sc.no }}", { y: {{ shot.y }}, scale: 1 }, {{ shot.at }});
+      // 갈리는 순간에 아주 짧은 페이드만 얹는다. 하드 컷이 튀는 것을 눌러 준다.
+      tl.fromTo("#art{{ '%03d' % sc.no }}",
+        { autoAlpha: 0.55 }, { autoAlpha: 1, duration: 0.12, ease: "power1.out" },
+        {{ shot.at }});
+      {%- endif %}
+      {%- endfor %}
+
+      {%- if hook_fixed %}
+      // 고정 후크일 때 씬마다 바뀌는 것은 **항목 번호 하나**뿐이다.
+      tl.from("#nm{{ '%03d' % sc.no }}",
+        { autoAlpha: 0, y: 10, duration: 0.34, ease: "power2.out" }, {{ sc.start }});
+      {%- else %}
       // 후크 두 줄이 차례로. autoAlpha 만 쓴다(display/visibility 트윈 금지).
-      // 후크 두 줄이 차례로. 폭을 줄이고 시간을 늘렸다 — 씬이 바뀌는 순간에
-      // 후크·밑줄·자막이 동시에 들이치면 그 자체가 촐싹거림이 된다.
+      // 폭을 줄이고 시간을 늘렸다 — 씬이 바뀌는 순간에 후크·밑줄·자막이
+      // 동시에 들이치면 그 자체가 촐싹거림이 된다.
       tl.from("#sc{{ '%03d' % sc.no }} .hook .line",
         { y: 24, autoAlpha: 0, duration: 0.55, stagger: 0.18, ease: "power2.out" },
         {{ sc.start }});
@@ -194,11 +253,12 @@
       tl.fromTo("#ru{{ '%03d' % sc.no }}",
         { scaleX: 0 }, { scaleX: 1, duration: 0.62, ease: "power2.out" },
         {{ sc.start + 0.78 }});
+      {%- endif %}
 
       // 강조 도형 — 한 번에 나타나지 않고 그려진다.
       // ★ drawSVG 를 쓰지 않는다 — GSAP Club(유료) 플러그인이라 무료 gsap.min.js
       //   에는 없고, 없으면 **조용히 아무 일도 안 일어난다.** 대신 dash 로 긋는다.
-      {%- if not sc.animated %}
+      {%- if sc.accent %}
       {%- if sc.accent.kind == 'dot' %}
       tl.fromTo("#ac{{ '%03d' % sc.no }}",
         { scale: 0, transformOrigin: "center center" },
@@ -218,6 +278,14 @@
         {{ sc.start }});
 {% endfor %}
 
+{% if hook_fixed %}
+      // 고정 후크 — 처음 한 번만 들어오고 그대로 있다. 씬마다 다시 튀우면
+      // 고정의 뜻이 없어진다.
+      tl.from("#hookfix .line",
+        { y: 22, autoAlpha: 0, duration: 0.5, stagger: 0.14, ease: "power2.out" }, 0);
+      tl.fromTo("#rufix", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "power2.out" }, 0.7);
+{% endif %}
+
       // 자막 큐 — 아래에서 살짝 올라온다
 {% for cue in cues %}
       // ★ 자막은 **움직이지 않는다.** 예전에 26px 올라오게 했더니 2초마다
@@ -225,6 +293,37 @@
       tl.from("#cc{{ '%03d' % loop.index }}",
         { autoAlpha: 0, duration: 0.30, ease: "power1.out" }, {{ cue.start }});
 {%- endfor %}
+
+      /* ★★ SMIL 을 타임라인에 **묶는다.** 이것이 없으면 장면이 조용히 멈춘다.
+       *
+       * SMIL 은 GSAP 과 **다른 시계**를 쓴다. 렌더러는 GSAP 을 seek 하는데
+       * SMIL 문서 시계는 벽시계로 저 혼자 흐른다. 실측(2026-09-08):
+       * 타임라인이 11.0초일 때 SMIL 시계는 1.35초였다 —
+       * `begin="10.725s"` 로 밀어 둔 드러남이 **영원히 안 일어나서**
+       * `opacity="0"` 인 요소가 화면에서 통째로 빠졌다. 그림칸이 비어 보였다.
+       *
+       * 예전 판이 안 걸린 이유: 그때는 그림이 처음부터 다 보였고 드러남은
+       * 덤이었다. 요소를 숨겨 놓고 말에 맞춰 들여보내기 시작하니 치명적이 됐다.
+       *
+       * `pauseAnimations()` 로 자체 진행을 끊고 프레임마다 `setCurrentTime()`
+       * 으로 세운다 — `tools/shot_svg.mjs` 가 한 컷을 뽑을 때 쓰는 것과 같다.
+       * 그래서 「거기서 보이면 렌더에서도 보인다」가 성립한다. */
+      const smilSvgs = Array.prototype.slice.call(
+        document.querySelectorAll(".art.live > .cam > svg"));
+      smilSvgs.forEach(function (s) {
+        if (typeof s.pauseAnimations === "function") s.pauseAnimations();
+      });
+      function syncSmil() {
+        const t = tl.time();
+        for (let i = 0; i < smilSvgs.length; i++) {
+          const s = smilSvgs[i];
+          if (typeof s.setCurrentTime === "function") {
+            try { s.setCurrentTime(t); } catch (e) { /* 이 씬은 넘긴다 */ }
+          }
+        }
+      }
+      tl.eventCallback("onUpdate", syncSmil);
+      syncSmil();
 
       window.__timelines["main"] = tl;
     </script>

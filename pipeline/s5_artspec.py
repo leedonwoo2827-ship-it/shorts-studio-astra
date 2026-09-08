@@ -60,8 +60,33 @@ _LOOPY = ("주기", "반복", "왕복", "흔들", "깜빡", "진동", "오간다
 
 
 def motions(r: Dict[str, Any]) -> List[str]:
-    """한 씬의 움직임 — 변동 하나 + 거드는 것 하나(있으면)."""
-    return [x for x in (r.get("change"), r.get("support")) if x]
+    """한 씬의 움직임 — 변동 · 거드는 것 · 연쇄의 박자 전부."""
+    out = [x for x in (r.get("change"), r.get("support")) if x]
+    out += [str(b.get("what") or "") for b in (r.get("beats") or [])]
+    return [x for x in out if x]
+
+
+def find_overlap(r: Dict[str, Any], mot_sec: float) -> List[str]:
+    """연쇄가 **순차인지** 본다. 겹치면 셋이 동시에 움직여 아무것도 안 보인다.
+
+    반복 대신 연쇄로 가는 것이 이 형식의 요점이라, 창이 겹치는 순간 그 이득이
+    사라진다. 막지 않고 알려 준다 — 사람이 그 줄만 고치면 된다.
+    """
+    bad: List[str] = []
+    beats = sorted((r.get("beats") or []), key=lambda b: float(b.get("at") or 0))
+    prev_end = -1.0
+    for b in beats:
+        at, until = float(b.get("at") or 0), float(b.get("until") or 0)
+        if until <= at:
+            bad.append(f"씬 {r.get('no')}: 박자 길이가 0 이하입니다 ({at}~{until})")
+        elif at < prev_end - 0.01:
+            bad.append(f"씬 {r.get('no')}: 박자가 겹칩니다 ({at}초가 앞 박자 "
+                       f"{prev_end}초 안으로 들어옵니다)")
+        if until > mot_sec + 0.01:
+            bad.append(f"씬 {r.get('no')}: 박자가 동작 창({mot_sec}초)을 넘습니다 "
+                       f"({until}초)")
+        prev_end = max(prev_end, until)
+    return bad
 
 
 def find_loopy(rows: List[Dict[str, Any]]) -> List[str]:
@@ -74,6 +99,38 @@ def find_loopy(rows: List[Dict[str, Any]]) -> List[str]:
                     hits.append(f"씬 {r['no']}: 「{w}」 — {m[:70]}")
                     break
     return hits
+
+
+def make_camera(cues: List[Dict[str, Any]], n_cells: int,
+                scene_sec: float) -> List[Dict[str, Any]]:
+    """**자막 큐 경계에서 카메라를 만든다.** 모델이 시각을 찍지 않는다.
+
+    큐는 음성 실측에서 나오므로(`s4_subs`) 카메라도 실측에 맞고, 어긋날 여지가
+    없다. 자막 조각과 화면이 **같은 시각에 튀는 것**이 리듬의 전부다 —
+    따로 두면 둘 다 죽는다.
+
+    칸보다 큐가 많으면 칸을 되쓰되 `좁히기` 로 변화를 준다. 같은 칸을 같은
+    크기로 두 번 보여 주면 컷이 안 생긴 것처럼 보인다.
+    """
+    if n_cells <= 0:
+        return []
+    if not cues:
+        return [{"at": 0.0, "cell": 1, "move": "고정"}]
+
+    shots: List[Dict[str, Any]] = []
+    seen: Dict[int, int] = {}
+    for i, cue in enumerate(cues):
+        cell = (i % n_cells) + 1
+        seen[cell] = seen.get(cell, 0) + 1
+        if i == 0:
+            move = "고정"           # 첫 컷은 뛸 곳이 없다
+        elif seen[cell] > 1:
+            move = "좁히기"         # 되쓰는 칸 — 같은 그림을 다르게 본다
+        else:
+            move = "뛰기"
+        shots.append({"at": round(float(cue.get("t") or 0.0), 3),
+                      "cell": cell, "move": move})
+    return shots
 
 
 def run(slug: str, *, on_activity: Optional[Callable[[str], None]] = None
@@ -89,6 +146,42 @@ def run(slug: str, *, on_activity: Optional[Callable[[str], None]] = None
     width, height = int(c.get("width", 1080)), int(c.get("height", 1920))
     top, bottom = int(c.get("band_top", 300)), int(c.get("band_bottom", 320))
 
+    cells_per = max(1, int(config.get("art.cells_per_scroll", 3)))
+    max_scrolls = max(1, int(config.get("art.max_scrolls", 4)))
+
+    # 구조.json — 씬이 가리키는 사실의 값·단위·표·골격을 프롬프트에 붙인다.
+    # 「비율이 주장이면 셀 수 있는 것을 놓아라」는 지시가 그때 실제 숫자를 갖는다.
+    struct: Dict[str, Any] = {}
+    sp = paths.structure_json(slug)
+    if sp.exists():
+        try:
+            struct = json.loads(sp.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            struct = {}
+    facts = {str(f.get("id")): f for f in (struct.get("facts") or [])}
+    tables = {str(t.get("id")): t for t in (struct.get("tables") or [])}
+    blk_table = {str(t.get("block")): str(t.get("id")) for t in (struct.get("tables") or [])}
+    skels = {str(k.get("block")): k for k in (struct.get("skeletons") or [])}
+
+    def evidence(s: Dict[str, Any]) -> List[str]:
+        """이 씬이 쓰는 사실의 값·표·골격. 없으면 빈 목록이다."""
+        fid = (s.get("fact") or "").strip()
+        f = facts.get(fid)
+        if not f:
+            return []
+        out = [f"  ★ 이 씬의 사실: [{f['kind']}] {f['label']} = "
+               f"{f['value']}{f['unit']}" + (f" ({f['year']}년)" if f.get("year") else "")]
+        tid = blk_table.get(str(f.get("block")))
+        t = tables.get(tid) if tid else None
+        if t:
+            out.append("    표: " + " / ".join(t.get("head") or []))
+            for row in (t.get("rows") or [])[:4]:
+                out.append("        " + " · ".join(row))
+        k = skels.get(str(f.get("block")))
+        if k:
+            out.append(f"    도해 초안 [{k.get('kind')}]: {k.get('aria', '')[:120]}")
+        return out
+
     fallback = round(float(doc.get("seconds") or 22.0) / max(1, len(scenes)), 1)
 
     def window(s: Dict[str, Any]) -> tuple:
@@ -103,17 +196,34 @@ def run(slug: str, *, on_activity: Optional[Callable[[str], None]] = None
             return round(full * CLOSE_MOTION_RATIO, 2), full
         return full, full
 
+    def n_cells(s: Dict[str, Any]) -> int:
+        """이 씬을 칸 몇 개로 그릴까. **자막 조각 수가 정한다** — 조각 하나가 컷
+        하나이므로 조각이 잦은 씬은 칸이 더 필요하다. 상한은 `cells_per_scroll`."""
+        cues = s.get("cues") or []
+        return max(1, min(cells_per, len(cues) or 1))
+
     def line(s: Dict[str, Any]) -> str:
         mot, full = window(s)
         tail = ("  ← 마무리 씬: 남은 시간은 화면이 정지한 채 말이 이어진다"
                 if (s.get("role") or "") == "close" else "")
-        return "\n".join([
+        cues = s.get("cues") or []
+        nc = n_cells(s)
+        rows = [
             f"- 씬 {s['no']} ({s.get('role') or 'body'}) · 화면에 {full}초 있고 "
             f"**동작은 {mot}초 안에 끝낸다**{tail}",
             f"  자막: 「{s.get('srt_text', '')}」",
+        ]
+        if cues:
+            rows.append("  자막 조각 (조각 하나가 컷 하나다): "
+                        + " | ".join(f"{c.get('t')}초 「{c.get('text')}」" for c in cues))
+        rows.append(f"  ★ 이 씬은 **칸 {nc}개**짜리 두루마리다. 칸마다 다른 사물, "
+                    f"칸마다 다른 채움(낱개·꽉·여백).")
+        rows += [
             f"  장면 요지: {s.get('image_brief', '')}",
             f"  원문 근거: {s.get('source', '')}",
-        ])
+        ]
+        rows += evidence(s)
+        return "\n".join(rows)
 
     scene_list = "\n".join(line(s) for s in scenes)
     user = prompts.render("artspec", style_hint=img.get("style_hint", ""),
@@ -154,17 +264,37 @@ def run(slug: str, *, on_activity: Optional[Callable[[str], None]] = None
 
     rows: List[Dict[str, Any]] = []
     missing: List[int] = []
+    overlap: List[str] = []
     for s in scenes:
         no = int(s["no"])
         r = got.get(no)
         if not r:
             missing.append(no)
             continue
+        mot, full = window(s)
+
+        # 칸 — 모델이 준 것을 쓰되 수를 코드가 맞춘다. 자막 조각 수가 칸 수를
+        # 정하므로 모델이 더 주거나 덜 주면 여기서 자르거나 채운다.
+        want = n_cells(s)
+        cells = [dict(c) for c in (r.get("cells") or [])][:want]
+        while len(cells) < want:
+            cells.append({"no": len(cells) + 1,
+                          "what": (r.get("stage") or "")[:200] or "앞 칸과 같은 무대",
+                          "fill": "여백"})
+        for i, cell in enumerate(cells, 1):
+            cell["no"] = i
+            cell.setdefault("fill", "꽉")
+
+        beats = [dict(b) for b in (r.get("beats") or [])]
+        overlap += find_overlap({**r, "no": no, "beats": beats}, mot)
+
+        cam = make_camera(s.get("cues") or [], len(cells), full)
+
         rows.append({
             "no": no,
             "file": f"{no:03d}.svg",
-            "sec": window(s)[0],          # 동작이 끝나야 하는 시각
-            "scene_sec": window(s)[1],    # 화면에 있는 시간
+            "sec": mot,                   # 동작이 끝나야 하는 시각
+            "scene_sec": full,            # 화면에 있는 시간
             "role": s.get("role") or "body",
             "claim": r["claim"].strip(),
             "stage": r["stage"].strip(),
@@ -172,6 +302,14 @@ def run(slug: str, *, on_activity: Optional[Callable[[str], None]] = None
             "change": r["change"].strip(),
             "support": (r.get("support") or "").strip(),
             "palette_note": (r.get("palette_note") or "").strip(),
+            # ── 두루마리 ──
+            # `canvas_h` 는 칸 수 x 화면 높이다. 아스트라가 이 높이로 viewBox 를
+            # 잡고, 카메라가 칸 사이를 끊어 뛴다. 값은 코드가 정한다 — 모델이
+            # 정하면 칸 경계가 화면과 안 맞아 그림이 반쪽으로 잘린다.
+            "canvas_h": height * len(cells),
+            "cells": cells,
+            "beats": beats,
+            "camera": cam,
         })
 
     doc_out: Dict[str, Any] = {
@@ -187,13 +325,19 @@ def run(slug: str, *, on_activity: Optional[Callable[[str], None]] = None
                     "point": c.get("point", "#DEEBF7"),
                     "accent": c.get("accent", "#E07A2F")},
         "count": len(rows),
+        "cells_total": sum(len(r.get("cells") or []) for r in rows),
+        "cuts_total": sum(len(r.get("camera") or []) for r in rows),
         "file_naming": "파일 앞 세 자리가 씬 번호다. 004.svg → 4번 씬. "
                        "직접 만든 장면을 04_장면/ 에 같은 이름으로 넣어도 된다. "
                        "움직이는 장면은 .svg, 정지 그림은 .png 다.",
         "scenes": rows,
         "cost_usd": round(cost, 4),
         "warnings": ([f"씬 {missing} 의 지시가 오지 않았습니다."] if missing else [])
-                    + warn_loopy,
+                    + warn_loopy + overlap
+                    + ([f"두루마리가 {len(rows)}장입니다 — 상한 {max_scrolls}장을 "
+                        f"넘어 아스트라가 {len(rows) * 2.5:.0f}분 걸립니다. "
+                        f"매일 한 편 돌리려면 art.cells_per_scroll 을 올리세요."]
+                       if len(rows) > max_scrolls else []),
     }
     atomic_write_json(str(paths.art_spec(slug)), doc_out, indent=2)
     return doc_out

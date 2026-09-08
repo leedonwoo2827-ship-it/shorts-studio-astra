@@ -17,6 +17,7 @@ from typing import Any, Callable, Dict, List, Optional
 from core import config, paths
 from core.atomic_io import atomic_write_json, atomic_write_text
 from pipeline import (s0_source, s1_script, s2_speech, s3_tts, s4_subs,
+                      s0b_draft, s0c_structure,
                       s5_artspec, s6_art, s6b_mux, s7_compose, s8_render,
                       s9_meta)
 from pipeline.stages import ALL_ORDER, BY_GROUP, BY_KEY
@@ -71,21 +72,57 @@ def _source_meta(slug: str) -> Dict[str, Any]:
             return json.loads(p.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
             pass
-    return {"cuts": int(config.get("shorts.cuts", 3)),
+    return {"format": config.get("shorts.format", "narrative"),
             "voice": config.get("narration.voice", "F2"),
             "speed": config.get("narration.speed", 1.2)}
 
 
+# ── 원고 · 구조 ─────────────────────────────────────────────────────────
+def stage_draft(slug: str, log: Log, **_: Any) -> Dict[str, Any]:
+    """`source.md` → `원고.html`. 소제목을 복원하고 수치를 표로 세운다."""
+    log("  줄글에서 소제목을 떼어내고 수치·연표·비교를 표로 세우는 중")
+    out = s0b_draft.run(slug, on_activity=lambda m: log(f"  · {m}"))
+    log(f"  절 {out['sections']}개 · 블록 {out['blocks']}개 · 표 {out['tables']}개 · "
+        f"골격 {out['skeletons']}개 · {out['chars']:,}자 · ${out.get('cost_usd', 0):.2f}")
+    for w in out.get("warnings") or []:
+        log(f"  ⚠ {w}")
+    log("  고칠 데가 있으면 「재료 → 원고」 탭에서 지금 고치세요")
+    return out
+
+
+def stage_structure(slug: str, log: Log, **_: Any) -> Dict[str, Any]:
+    """`원고.html` → `구조.json`. **모델을 부르지 않는다 — 크레딧 0.**"""
+    out = s0c_structure.run(slug, log=lambda m: log(f"  {m}"))
+    return out
+
+
 # ── 1~8 ────────────────────────────────────────────────────────────────
 def stage_script(slug: str, log: Log, **opts: Any) -> Dict[str, Any]:
+    """★ 씬 수를 넘기지 않는다. 재료가 정한다.
+
+    `cuts` 는 시험용 강제로만 받는다 — 평소 경로에서는 아무도 주지 않는다.
+    """
     meta = _source_meta(slug)
-    cuts = int(opts.get("cuts") or meta.get("cuts") or config.get("shorts.cuts", 3))
-    log(f"  씬 {cuts}개 · 예산 {config.budget_chars(cuts)}자")
-    out = s1_script.run(slug, cuts=cuts, on_activity=lambda m: log(f"  · {m}"))
+    fmt = str(opts.get("fmt") or meta.get("format")
+              or config.get("shorts.format", "narrative"))
+    cuts = int(opts["cuts"]) if opts.get("cuts") else None
+    lo, hi = config.seconds_range()
+    log(f"  형식 {fmt} · 목표 {lo:.0f}~{hi:.0f}초 · 예산 {config.budget_chars(cuts)}자 · "
+        f"씬 상한 {config.get('shorts.cuts_max', 8)}개"
+        + (f" · 씬 {cuts}개로 **강제**" if cuts else " · 씬 수는 재료가 정합니다"))
+    out = s1_script.run(slug, cuts=cuts, fmt=fmt,
+                        on_activity=lambda m: log(f"  · {m}"))
     b = out.get("budget") or {}
     log(f"  「{out.get('title')}」 씬 {len(out.get('scenes') or [])} · "
         f"{b.get('chars')}자 / {b.get('limit')}자 · 추정 {b.get('est_sec')}초 · "
         f"${out.get('cost_usd', 0):.2f}")
+    hf = out.get("hook_fixed") or {}
+    if hf.get("line1"):
+        mk = f" · 강조 「{hf['mark']}」" if hf.get("mark") else " · 둘째 줄 전체 강조"
+        log(f"  고정 후크 「{hf['line1']} / {hf.get('line2', '')}」{mk}")
+    for s in out.get("scenes") or []:
+        log(f"    씬 {s['no']} ({s.get('role')}) "
+            + (f"[{s['fact']}] " if s.get("fact") else "") + f"{s.get('srt_text', '')[:46]}")
     for w in out.get("warnings") or []:
         log(f"  ⚠ {w}")
     return out
@@ -115,7 +152,9 @@ def stage_tts(slug: str, log: Log, **opts: Any) -> Dict[str, Any]:
 
 def stage_subs(slug: str, log: Log, **_: Any) -> Dict[str, Any]:
     out = s4_subs.run(slug)
-    log(f"  자막 큐 {out['cues']}개 · 총 {out['total_sec']}초")
+    # ★ 큐 수가 곧 컷 수다. 이 숫자가 역동성의 척도다 — v13 은 여기가 9였다.
+    log(f"  자막 조각 {out['cues']}개 (= 컷 {out['cues']}개) · "
+        f"조각 한도 {out.get('cue_limit')}자 · 총 {out['total_sec']}초")
     if out.get("estimated"):
         log(f"  ⚠ 씬 {out['estimated']} 은 소리가 없어 길이를 **추정**했습니다. "
             f"「음성」을 돌리면 실측으로 바뀝니다.")
@@ -124,12 +163,22 @@ def stage_subs(slug: str, log: Log, **_: Any) -> Dict[str, Any]:
 
 def stage_artspec(slug: str, log: Log, **_: Any) -> Dict[str, Any]:
     out = s5_artspec.run(slug, on_activity=lambda m: log(f"  · {m}"))
-    log(f"  장면 지시 {out['count']}개 · ${out.get('cost_usd', 0):.2f}")
+    log(f"  장면 지시 {out['count']}개 · 두루마리 칸 {out.get('cells_total')}개 · "
+        f"컷 {out.get('cuts_total')}개 · ${out.get('cost_usd', 0):.2f}")
     for r in out.get("scenes") or []:
-        log(f"    씬 {r['no']} · 화면 {r.get('scene_sec', r['sec'])}초 · 동작은 {r['sec']}초 안에")
+        log(f"    씬 {r['no']} · 화면 {r.get('scene_sec', r['sec'])}초 · 동작은 {r['sec']}초 안에"
+            f" · 두루마리 {r.get('canvas_h')}px ({len(r.get('cells') or [])}칸)")
         log(f"      주장 : {r.get('claim', '')}")
         log(f"      무대 : {r.get('stage', '')[:100]}")
         log(f"      변동 : {r.get('change', '')}")
+        for cell in r.get("cells") or []:
+            log(f"      칸{cell['no']} [{cell.get('fill', '')}] {cell.get('what', '')[:80]}")
+        for b in r.get("beats") or []:
+            log(f"      박자 {b.get('at')}~{b.get('until')}초 : {b.get('what', '')[:70]}")
+        cam = r.get("camera") or []
+        if cam:
+            log("      카메라 : " + " → ".join(
+                f"{x['at']}초 칸{x['cell']}({x['move']})" for x in cam))
         if r.get("support"):
             log(f"      거듦 : {r['support']}")
     for w in out.get("warnings") or []:
@@ -220,6 +269,8 @@ def stage_result(slug: str, log: Log, **opts: Any) -> Dict[str, Any]:
 
 FUNCS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "source": stage_source,
+    "draft": stage_draft,
+    "structure": stage_structure,
     "script": stage_script,
     "speech": stage_speech,
     "tts": stage_tts,
