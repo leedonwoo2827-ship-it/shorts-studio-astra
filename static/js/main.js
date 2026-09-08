@@ -407,8 +407,19 @@ function sceneEditor(d, { showSource, showNarration, showVerify, showArt } = {})
      *   축소판이 된다. 글자가 띠 밖으로 넘치는지, 후크가 잘리는지가 여기서 보인다.
      *   실제 화면도 「장면에는 글자가 없고 글자는 전부 위에 얹는 층」이라 같은 모양이다. */
     const slide = el("div", "slide");
+    /* ★ **최종 화면이 있으면 그것을 쓴다.** 장면 SVG 만 얹으면 글자가 띠를 넘치는지,
+     *   자막이 그림을 가리는지가 안 보인다 — 굽고 나서야 알게 된다.
+     *   컴포지션을 굽기 전에는 없으므로 그때는 SVG 로 물러선다. */
+    const hasFrame = (S.proj?.frames || []).includes(s.no);
     const art = (S.proj?.art || {})[String(s.no)] || (S.proj?.art || {})[s.no];
-    if (art) {
+    if (hasFrame) {
+      const im = document.createElement("img");
+      im.src = `/api/projects/${enc}/frame/${s.no}`;
+      im.alt = `씬 ${s.no} 최종 화면`;
+      im.loading = "lazy";
+      slide.appendChild(im);
+      slide.classList.add("final");
+    } else if (art) {
       const o = document.createElement("object");
       o.type = String(art).toLowerCase().endsWith(".svg") ? "image/svg+xml" : "";
       o.data = `/api/projects/${enc}/art/${s.no}`;
@@ -417,7 +428,7 @@ function sceneEditor(d, { showSource, showNarration, showVerify, showArt } = {})
       slide.classList.add("empty");
     }
     // 위 띠(후크) · 아래 띠(자막) — 장면이 있든 없든 늘 얹는다
-    const fixed = (S.proj?.script || {}).hook_fixed || {};
+    const fixed = hasFrame ? {} : ((S.proj?.script || {}).hook_fixed || {});
     const h1 = s.hook_line1 || fixed.line1 || "";
     const h2 = s.hook_line2 || fixed.line2 || "";
     if (h1 || h2) {
@@ -426,8 +437,8 @@ function sceneEditor(d, { showSource, showNarration, showVerify, showArt } = {})
       if (h2) band.appendChild(el("div", "l2", h2));
       slide.appendChild(band);
     }
-    if (s.srt_text) slide.appendChild(el("div", "sl-cap", s.srt_text));
-    if (!art) slide.appendChild(el("span", "sl-tag", "장면 전"));
+    if (s.srt_text && !hasFrame) slide.appendChild(el("div", "sl-cap", s.srt_text));
+    if (!art && !hasFrame) slide.appendChild(el("span", "sl-tag", "장면 전"));
 
     /* ② 씬 번호·역할 */
     const meta = el("div", "smeta");

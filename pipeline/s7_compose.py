@@ -20,12 +20,14 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from core import config, paths
+from core.atomic_io import atomic_write_json
 from pipeline import s6_art
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -526,12 +528,33 @@ def run(slug: str, *, on_log: Optional[Callable[[str], None]] = None) -> Dict[st
     )
     (out / "index.html").write_text(html, encoding="utf-8", newline="\n")
 
+    # ★ 씬 시각을 파일로 남긴다 — 스토리보드가 씬마다 **최종 화면**을 한 장씩 찍을 때
+    #   쓴다. 계산은 여기 한 곳에만 둔다. 찍는 쪽에서 다시 세면 언젠가 서로 달라지고,
+    #   그때 슬라이드가 엉뚱한 순간을 보여 준다.
+    atomic_write_json(str(out / "장면시각.json"), {
+        "total": total,
+        "scenes": [{"no": sc["no"], "start": sc["start"], "dur": sc["dur"]}
+                   for sc in scenes],
+    }, indent=2)
+
     cuts_n = sum(len(sc.get("camera") or []) for sc in scenes)
     log(f"  씬 {len(scenes)} · 두루마리 칸 {sum(sc['cells_n'] for sc in scenes)} · "
         f"컷 {cuts_n} · 자막 큐 {len(cues)} · 소리 {audio_n} · 총 {total:.2f}초")
     if fixed:
         log(f"  고정 후크 「{hf.get('line1')} / {hf.get('line2', '')}」"
             + (f" · 강조 「{hf['mark']}」" if hf.get("mark") else " · 둘째 줄 전체"))
+    # 최종 화면 여덟 장 — 실패해도 컴포지션은 성공이다. 슬라이드는 그때 장면 SVG 로 간다.
+    try:
+        r = subprocess.run(
+            ["node", str(ROOT / "tools" / "frames.mjs"), str(out), str(out / "frames")],
+            cwd=str(ROOT), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=180)
+        made = sum(1 for ln in (r.stdout or "").splitlines() if ln.startswith("[frame]"))
+        log(f"  최종 화면 {made}장" if made
+            else "  최종 화면은 못 찍었습니다 — 슬라이드는 장면 SVG 로 갑니다")
+    except Exception as e:  # noqa: BLE001
+        log(f"  최종 화면 건너뜀: {e}")
+
     return {"dir": str(out), "total_sec": total, "scenes": len(scenes),
             "cues": len(cues), "audio": audio_n,
             "art": sorted(have_art), "fps": fps,

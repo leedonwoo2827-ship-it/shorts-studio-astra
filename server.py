@@ -204,6 +204,11 @@ def create_app() -> FastAPI:
                                  .read_text(encoding="utf-8"))
                       if (paths.plan_dir(slug) / "원고.json").exists() else None),
             "art": runner.s6_art.present(slug),
+            # 최종 화면이 찍힌 씬들 — 스토리보드가 이것을 슬라이드로 쓴다
+            "frames": sorted(int(f.stem) for f in
+                             (paths.comp_dir(slug) / "frames").glob("*.png")
+                             if f.stem.isdigit())
+            if (paths.comp_dir(slug) / "frames").is_dir() else [],
             "build": ({"name": build.name,
                        "youtube": (build / "유튜브.txt").read_text(encoding="utf-8")
                        if (build / "유튜브.txt").exists() else "",
@@ -491,6 +496,20 @@ def create_app() -> FastAPI:
         if not p.exists():
             raise HTTPException(404, "그 씬 음성이 아직 없습니다.")
         return FileResponse(p, media_type="audio/wav")
+
+    @app.get("/api/projects/{slug}/frame/{no}")
+    def get_frame(slug: str, no: int) -> FileResponse:
+        """씬 하나의 **최종 화면** — 후크·자막·해시태그까지 얹힌 그대로.
+
+        ★ 스토리보드 슬라이드가 이것을 쓴다. 장면 SVG 만 얹으면 글자가 띠를 넘치는지,
+          자막이 그림을 가리는지가 안 보인다 — 굽고 나서야 알게 된다.
+        ★ 컴포지션을 굽기 전에는 없다. 그때는 화면이 장면 SVG 로 물러선다.
+        """
+        _need(slug)
+        p = paths.comp_dir(slug) / "frames" / f"{int(no):03d}.png"
+        if not p.exists():
+            raise HTTPException(404, "아직 최종 화면이 없습니다 — 「컴포지션 굽기」를 먼저.")
+        return FileResponse(p, media_type="image/png")
 
     @app.get("/api/projects/{slug}/art/{no}")
     def get_art(slug: str, no: int) -> FileResponse:
