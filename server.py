@@ -82,7 +82,18 @@ def create_app() -> FastAPI:
     # ── 화면 ──────────────────────────────────────────────────────────────
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
-        return (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+        """화면 껍데기. **js·css 에 파일 시각을 붙여 보낸다.**
+
+        ★ 안 붙이면 브라우저가 옛 `main.js` 를 계속 쓴다. 서버를 다시 띄웠으니
+          새 화면일 거라 믿게 되는데, 레일은 `/api/stages` 라 바로 갱신되고 본문만
+          옛것으로 남는다 — **반만 바뀐 화면**이 가장 헷갈린다. 실제로 그랬다.
+        """
+        html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+        for rel in ("css/app.css", "js/main.js"):
+            f = ROOT / "static" / rel
+            v = int(f.stat().st_mtime) if f.exists() else 0
+            html = html.replace(f'"/static/{rel}"', f'"/static/{rel}?v={v}"')
+        return html
 
     @app.get("/api/stages")
     def stage_table() -> Dict[str, Any]:
