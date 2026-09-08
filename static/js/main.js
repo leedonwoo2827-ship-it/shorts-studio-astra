@@ -127,6 +127,19 @@ function drawDock() {
   const pct = S.job.status === "done" ? 100
     : (S.job.total > 0 ? Math.round((S.job.completed / S.job.total) * 100) : 0);
   $("#dock-bar").style.width = pct + "%";
+
+  /* ★ 막대 하나로는 「도는지 멎었는지」를 못 읽는다. 장면 제작은 씬당 2분 30초라
+   *   여덟 씬이면 20분인데, 그동안 화면이 아무 말도 안 하면 사람이 껐다 켠다.
+   *   몇 개 중 몇 개인지와 **몇 분째인지**를 같이 적는다. */
+  const meter = [];
+  if (S.job.total > 0) meter.push(`${S.job.completed}/${S.job.total} · ${pct}%`);
+  const t0 = Date.parse(S.job.started_at || "");
+  if (!Number.isNaN(t0)) {
+    const end = S.job.finished_at ? Date.parse(S.job.finished_at) : Date.now();
+    const sec = Math.max(0, Math.round((end - t0) / 1000));
+    meter.push(`${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`);
+  }
+  $("#dock-meter").textContent = meter.join("  ·  ");
   $("#dock-stop").hidden = S.job.status !== "running";
 
   const log = $("#log");
@@ -1016,6 +1029,7 @@ PAGES.storyboard = async (m) => {
 /* 장면 제작 — 아스트라 */
 PAGES.art = (m) => {
   const p = S.proj;
+  const enc = encodeURIComponent(S.slug);
   m.appendChild(head("장면 제작",
     "아스트라가 씬마다 움직이는 장면을 코드로 씁니다. 씬당 약 2분 30초, 가장 비싼 자리입니다."));
 
@@ -1036,20 +1050,62 @@ PAGES.art = (m) => {
       await loadProject(S.slug);
     } catch (e) { alert(e.message); } finally { ph.disabled = false; }
   };
-  c.appendChild(row(runBtn("art", "장면 받기"), f, ph));
-
+  /* ★ 위에는 **하나만** 둔다. 셋이 나란히 있으면 어느 것이 평소 길인지 안 보인다.
+   *   「전부 다시」와 「자리표시」는 가끔 쓰는 것이라 현황 아래로 내렸다. */
+  c.appendChild(row(runBtn("art", "장면 받기")));
   m.appendChild(c);
 
   /* ★ 여기가 **스토리보드가 채워지는 것을 보는 자리**다. 슬라이드가 하나씩 그려지는
    *   동안 그 옆의 자막·발음·소리를 같이 본다 — 장면이 자막과 어긋나면 여기서 보인다.
    *   씬 표는 스토리보드와 **같은 부품**이다. 두 벌을 두면 한쪽만 고쳐지고,
    *   그때 화면이 거짓말을 한다. */
+  /* ★ 여기서 볼 것은 **그림이 자막과 맞는가** 하나다. 자막·발음을 고치는 칸을 여기
+   *   또 두었더니 스토리보드와 같은 표가 두 벌이 됐다 — 어디서 고쳐야 하는지
+   *   사람이 알 수 없다. 여기서는 **읽기만** 하고, 고치는 것은 스토리보드에서 한다. */
+  const art = p.art || {};
   const d = p.script || {};
-  if (d.scenes && d.scenes.length) {
-    m.appendChild(sceneEditor(d, { showNarration: true, showVerify: true, showArt: true }));
-  } else {
+  if (!d.scenes || !d.scenes.length) {
     m.appendChild(card("씬", "아직 대본이 없습니다. 「대본」에서 먼저 뽑으세요."));
+    return;
   }
+  const sc2 = card("씬", "그림이 자막과 맞는지만 봅니다. 글을 고치려면 「스토리보드」로 가세요.");
+  d.scenes.forEach((s) => {
+    const line = el("div", "artline");
+    const slide = el("div", "slide");
+    const name = art[s.no];
+    if (name) {
+      const o = document.createElement("object");
+      o.type = /\.svg$/i.test(name) ? "image/svg+xml" : "";
+      o.data = `/api/projects/${enc}/art/${s.no}?t=${p.stamp || ""}`;
+      slide.appendChild(o);
+    } else {
+      slide.classList.add("empty");
+      slide.appendChild(el("span", "sl-tag", "장면 전"));
+    }
+    const body = el("div", "scell");
+    body.appendChild(row(
+      el("span", "no", String(s.no)),
+      el("span", "role", s.role || "body"),
+      el("span", "pill", name ? (/\.svg$/i.test(name) ? "움직임" : "정지") : "없음"),
+      s.audio_sec ? el("span", "pill ok", `${s.audio_sec.toFixed(1)}초`) : null,
+    ));
+    body.appendChild(el("div", "artcap", s.srt_text || ""));
+    const one = el("button", "btn sm money", "이 씬만 다시");
+    one.type = "button";
+    one.disabled = !!S.cfg?.readonly || (S.job && S.job.status === "running");
+    one.onclick = () => runStage("art", { only: [s.no], force: true });
+    body.appendChild(row(one));
+    line.append(slide, body);
+    sc2.appendChild(line);
+  });
+  m.appendChild(sc2);
+
+  const rare = card("가끔 쓰는 것");
+  rare.appendChild(row(f, ph));
+  rare.appendChild(el("div", "hint",
+    "「자리표시」는 아스트라를 안 부르고 같은 규격의 아이보리 판을 채웁니다 — "
+    + "컴포지션과 빌드를 크레딧 없이 끝까지 돌려 볼 때 씁니다."));
+  m.appendChild(rare);
 };
 
 /* 컴포지션 — **굽기 전에 화면을 보고 승인하는 자리** */
