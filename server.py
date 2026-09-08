@@ -538,7 +538,14 @@ def create_app() -> FastAPI:
         f = (base / (path or "index.html")).resolve()
         if not str(f).startswith(str(base)) or not f.is_file():
             raise HTTPException(404, "컴포지션에 그런 파일이 없습니다. 「컴포지션」을 먼저 돌리세요.")
-        return FileResponse(f)
+        # ★ **캐시를 막는다.** 컴포지션을 다시 구워도 브라우저가 옛 HTML 을 쥐고 있어서,
+        #   음성 35.7초짜리로 다시 구운 뒤에도 재생기가 52초를 보여 줬다. 굽기 전에
+        #   보라고 만든 화면이 옛것을 보여 주면 그 화면은 없느니만 못하다.
+        #   같은 이름으로 덮어쓰는 파일이라 쿼리 붙이기로는 부족하다 — 헤더로 막는다.
+        return FileResponse(f, headers={
+            "Cache-Control": "no-store, must-revalidate",
+            "Pragma": "no-cache",
+        })
 
     @app.get("/api/projects/{slug}/video")
     def get_video(slug: str) -> FileResponse:

@@ -598,14 +598,21 @@ function stepCard(key, n, hint) {
 function gatedRun(key, label, opts) {
   const b = runBtn(key, label, opts);
   const st = stageOf(key) || {};
+  /* ★ **낡은 것도 안 된 것으로 본다.** 예전에는 「done」이기만 하면 통과시켰는데,
+   *   음성을 다시 굽고 컴포지션을 안 굽고 빌드로 가면 옛 시각으로 구워진다 —
+   *   실측(2026-09-08): 음성 35.7초짜리인데 mp4 가 52.3초로 나왔다.
+   *   화면은 「낡음」이라고 적어 두고도 단추를 열어 두고 있었다. */
   const missing = (st.needs || []).filter((k) => {
     const d = stageOf(k) || {};
-    return d.state !== "done";
+    return d.state !== "done" || d.stale;
   });
   if (missing.length && !b.disabled) {
     b.disabled = true;
-    const names = missing.map((k) => (stageOf(k) || {}).name || k).join(" · ");
-    b.title = `먼저 「${names}」 를 끝내세요.`;
+    const names = missing.map((k) => {
+      const d = stageOf(k) || {};
+      return (d.name || k) + (d.stale ? "(낡음)" : "");
+    }).join(" · ");
+    b.title = `먼저 「${names}」 를 다시 돌리세요.`;
   }
   return { btn: b, missing };
 }
@@ -616,8 +623,11 @@ function runRow(key, label, opts, extra) {
   if (extra) kids.push(...(Array.isArray(extra) ? extra : [extra]));
   const r = row(...kids.filter(Boolean));
   if (missing.length) {
+    const stale = missing.some((k) => (stageOf(k) || {}).stale);
     const names = missing.map((k) => (stageOf(k) || {}).name || k).join(" · ");
-    r.appendChild(el("span", "hint", `먼저 「${names}」 를 끝내세요.`));
+    r.appendChild(el("span", "hint", stale
+      ? `「${names}」 가 낡았습니다 — 다시 돌린 뒤에 누르세요.`
+      : `먼저 「${names}」 를 끝내세요.`));
   }
   return r;
 }
