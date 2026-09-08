@@ -1349,6 +1349,55 @@ async function render() {
 }
 
 /* ── 연결 상태 칩 ─────────────────────────────────────────────────────── */
+/* 연결 칩을 누르면 뜨는 쪽지.
+   ★ `alert` 한 줄이었다. 읽고 나면 할 수 있는 것이 없어서, 터미널에서 고치고
+     돌아와도 **다시 확인할 길이 없었다** — 화면을 새로 고치는 수밖에 없었다.
+     여기서 바로 다시 보고, 쳐야 할 명령을 복사한다. */
+function connSheet(title, info) {
+  const back = el("div", "sheet-back");
+  const box = el("div", "sheet");
+  box.appendChild(el("h2", null, title));
+  box.appendChild(el("div", "sheet-state " + (info.ok ? "ok" : "bad"),
+    info.ok ? "쓸 수 있습니다" : "지금은 못 씁니다"));
+  if (info.message) box.appendChild(el("div", "sheet-msg", info.message));
+  if (info.path) box.appendChild(el("div", "hint", info.path));
+
+  if (info.cmd) {
+    const cmd = el("div", "sheet-cmd");
+    cmd.appendChild(el("code", null, info.cmd));
+    const cp = el("button", "btn sm", "복사");
+    cp.type = "button";
+    cp.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(info.cmd);
+        cp.textContent = "복사됨";
+        setTimeout(() => { cp.textContent = "복사"; }, 1400);
+      } catch (_) { /* 붙여넣기가 막힌 곳이면 손으로 옮기면 된다 */ }
+    };
+    cmd.appendChild(cp);
+    box.appendChild(cmd);
+    box.appendChild(el("div", "hint",
+      "터미널에 붙여넣고 실행한 뒤 「다시 확인」을 누르세요. 이 창은 켜 둔 채로 됩니다."));
+  }
+
+  const again = el("button", "btn primary", "다시 확인");
+  again.type = "button";
+  again.onclick = async () => {
+    again.disabled = true;
+    again.textContent = "확인 중…";
+    await chips();
+    back.remove();
+  };
+  const close = el("button", "btn", "닫기");
+  close.type = "button";
+  close.onclick = () => back.remove();
+  box.appendChild(row(again, close));
+
+  back.onclick = (e) => { if (e.target === back) back.remove(); };
+  back.appendChild(box);
+  document.body.appendChild(back);
+}
+
 async function chips() {
   const set = (sel, ok, text, title) => {
     const b = $(sel);
@@ -1362,12 +1411,30 @@ async function chips() {
     const ok = s.installed && s.credentials;
     set("#conn-llm", ok, ok ? "Claude 로그인됨" : "Claude 로그인 필요",
       ok ? s.path : "터미널에서 claude 를 한 번 실행해 로그인하세요.");
+    $("#conn-llm").onclick = () => connSheet("Claude — 대본·원고·장면 지시를 씁니다", {
+      ok,
+      path: s.path || "",
+      message: ok
+        ? "구독 로그인으로 돕니다. API 키를 쓰지 않습니다."
+        : "로그인이 안 돼 있어 원고·대본·장면 지시가 돌지 않습니다.",
+      cmd: ok ? "" : "claude",
+    });
   } catch (_) { set("#conn-llm", false, "Claude 확인 실패"); }
+
   try {
     const s = await api("/api/imagegen/status");
-    set("#conn-img", s.ok, s.ok ? "ChatGPT 로그인됨" : "ChatGPT 로그인 필요",
-      `${s.message}\n${s.how}`);
-    $("#conn-img").onclick = () => alert(`${s.message}\n\n${s.how}`);
+    /* ★ 「로그인됨」만 보고 초록불을 켜지 않는다. 토큰이 멀쩡해도 codex 판이 낮으면
+     *   아스트라를 못 부른다 — 실제로 여덟 씬이 전부 죽는 동안 칩은 초록이었고,
+     *   사람은 로그인을 의심하며 시간을 버렸다. */
+    set("#conn-img", s.ok, s.ok ? "ChatGPT 로그인됨" : "ChatGPT 준비 안 됨",
+      [s.message, s.how].filter(Boolean).join(NL));
+    $("#conn-img").onclick = () => connSheet("ChatGPT — 아스트라가 장면을 그립니다", {
+      ok: s.ok,
+      path: s.cli_version ? `codex ${s.cli_version}` : "",
+      message: [s.message, s.how].filter(Boolean).join(" "),
+      // 안내문에 든 명령을 그대로 꺼내 복사 단추에 건다
+      cmd: ((s.how || "").match(/`([^`]+)`/) || [])[1] || "",
+    });
   } catch (_) { set("#conn-img", false, "ChatGPT 확인 실패"); }
 }
 

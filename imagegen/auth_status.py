@@ -41,6 +41,28 @@ def _exp(token: str) -> Optional[int]:
     return int(exp) if isinstance(exp, (int, float)) else None
 
 
+# 아스트라(`gpt-6-astra`)를 부르려면 이 버전 이상이어야 한다. 그 아래는 모델 목록을
+# 읽다가 죽고(`unknown variant 'max'`), 씬마다 「못 부릅니다」만 남긴다.
+MIN_CLI = (0, 153)
+
+
+def cli_version() -> tuple:
+    """설치된 codex CLI 판. 못 읽으면 빈 튜플."""
+    import re
+    import shutil
+    import subprocess
+    exe = shutil.which("codex")
+    if not exe:
+        return ()
+    try:
+        r = subprocess.run([exe, "--version"], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=20)
+    except Exception:  # noqa: BLE001
+        return ()
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", (r.stdout or "") + (r.stderr or ""))
+    return tuple(int(x) for x in m.groups()) if m else ()
+
+
 def status() -> Dict[str, Any]:
     """`ok` 가 참일 때만 그림 단계를 눌러 볼 값이 있다."""
     out: Dict[str, Any] = {
@@ -89,6 +111,25 @@ def status() -> Dict[str, Any]:
         return out
 
     out["ok"] = True
+    out["how"] = ""          # 로그인됐는데 「로그인하세요」가 남으면 그것부터 의심하게 된다
+
+    # ★ **로그인만 보고 「됐다」고 말하지 않는다.** 실측(2026-09-08): 토큰은 멀쩡한데
+    #   CLI 가 0.137 이라 여덟 씬이 전부 「못 부릅니다」로 죽었다. 화면은 그동안
+    #   「ChatGPT 로그인됨」 초록불이었다 — 사람이 로그인을 의심하며 시간을 버린다.
+    ver = cli_version()
+    out["cli_version"] = ".".join(str(x) for x in ver) if ver else ""
+    if not ver:
+        out["ok"] = False
+        out["message"] = "codex 를 찾지 못했습니다."
+        out["how"] = "`npm i -g @openai/codex@latest` 로 설치하세요."
+        return out
+    if ver[:2] < MIN_CLI:
+        out["ok"] = False
+        out["message"] = (f"codex {out['cli_version']} 은 gpt-6-astra 를 못 부릅니다 "
+                          f"(필요: {MIN_CLI[0]}.{MIN_CLI[1]} 이상).")
+        out["how"] = "`npm i -g @openai/codex@latest` 로 올리세요."
+        return out
+
     if exp - now < SOON_SEC:
         out["message"] = (f"토큰이 {out['expires_at']} 에 만료됩니다 — "
                           f"그림을 받는 중에 끊길 수 있습니다.")
