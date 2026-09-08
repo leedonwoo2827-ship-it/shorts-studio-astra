@@ -123,7 +123,8 @@
         {%- if hook_fixed %}
         <div class="num" id="nm{{ '%03d' % sc.no }}">{{ sc.num }}</div>
         {%- else %}
-        <div class="hook">
+        <div class="hook"
+             style="--hooklen: {{ [sc.hook_line1|length, sc.hook_line2|length, 1]|max }}">
           <div class="h1 line">{{ sc.hook_line1 }}</div>
           <div class="h2 line">{{ sc.hook_line2 }}</div>
           <div class="rule" id="ru{{ '%03d' % sc.no }}"></div>
@@ -135,7 +136,8 @@
 {% if hook_fixed %}
       {#- 고정 후크 — 루트 직속이라 씬이 바뀌어도 그대로 있다.
             `mark` 만 강조색이다. 비어 있으면 둘째 줄 전체가 강조색이 된다. -#}
-      <div id="hookfix" class="clip hook hookfix" data-start="0" data-duration="{{ total }}">
+      <div id="hookfix" class="clip hook hookfix" data-start="0" data-duration="{{ total }}"
+           style="--hooklen: {{ [hook_fixed.line1|length, (hook_fixed.pre ~ hook_fixed.mark ~ hook_fixed.post)|length, 1]|max }}">
         <div class="h1 line">{{ hook_fixed.line1 }}</div>
         <div class="h2 line">{{ hook_fixed.pre }}<em>{{ hook_fixed.mark }}</em>{{ hook_fixed.post }}</div>
         <div class="rule" id="rufix"></div>

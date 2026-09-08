@@ -105,10 +105,14 @@ body {
 .hook .h1, .hook .h2 {
   font-family: "BlackHanSans", "Pretendard", "Malgun Gothic", sans-serif;
   font-weight: 400;               /* Black Han Sans 는 굵기가 하나다 */
-  font-size: 88px;
+  /* ★ 글자 수에 따라 줄어든다. 예전에는 88px 고정에 `nowrap` 이라, 상한을 넘긴
+     후크가 경고도 없이 **잘려 나갔다.** 띠 안쪽 폭은 1080-64-64=952px 이고
+     Black Han Sans 는 한글 한 글자가 거의 1em 이므로 952/글자수 가 들어갈 크기다.
+     `--hooklen` 은 컴포지션이 실제 글자 수로 채워 준다(없으면 12자로 본다). */
+  font-size: min(88px, calc(952px / var(--hooklen, 12) * 0.98));
   line-height: 1.06;
   letter-spacing: -0.02em;
-  white-space: nowrap;      /* 후크는 12자 상한이라 한 줄에 들어간다 */
+  white-space: nowrap;
 }
 .hook .h1 { color: var(--ink); }
 

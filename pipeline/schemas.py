@@ -12,8 +12,10 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-# 후크 한 줄 상한. 1080px 폭에 Black Han Sans 92px 이면 12자에서 꽉 찬다.
-HOOK_MAX = 12
+# 후크 한 줄 상한. 쇼츠공방 I 이 16자로 쓰고 있고 그 틀이 검증됐다 —
+# 「30만 명의 돌풍은 무엇인가?」(15자) 처럼 질문 한 줄이 들어가려면 12자로는 모자란다.
+# 길어지면 theme.css 가 글자를 줄인다(`--hooklen`).
+HOOK_MAX = 16
 # 자막 한 씬 상한. 30초/3컷이면 씬당 66자인데, 여유를 두고 90자에서 끊는다.
 SRT_MAX = 90
 
