@@ -177,3 +177,68 @@ META_SCHEMA: Dict[str, Any] = {
         "pinned_comment": {"type": "string", "minLength": 10, "maxLength": 400},
     },
 }
+
+
+# ── 대본 다듬기 3종 (s1b_revise) ─────────────────────────────────────────
+# ★ 셋 다 **씬 번호를 키로 돌려받는다.** 배열 순서로 받으면 모델이 씬 하나를
+#   빠뜨렸을 때 그 뒤가 통째로 한 칸씩 밀리는데, 그것이 조용히 통과한다.
+
+VERIFY_SCHEMA: Dict[str, Any] = {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["results"],
+    "properties": {
+        "results": {
+            "type": "array", "minItems": 1, "maxItems": 12,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["no", "ok", "reason", "alts"],
+                "properties": {
+                    "no": {"type": "integer", "minimum": 1, "maximum": 99},
+                    "ok": {"type": "boolean"},
+                    # 짧게. 길게 쓰라고 하면 거기서 또 지어낸다.
+                    "reason": {"type": "string", "maxLength": 80},
+                    "alts": {"type": "array", "minItems": 1, "maxItems": 3,
+                             "items": {"type": "string", "minLength": 4,
+                                       "maxLength": SRT_MAX}},
+                },
+            },
+        },
+    },
+}
+
+HOOKS_SCHEMA: Dict[str, Any] = {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["line1", "line2"],
+    "properties": {
+        "line1": {"type": "string", "minLength": 1, "maxLength": HOOK_MAX},
+        "line2": {"type": "string", "minLength": 1, "maxLength": HOOK_MAX},
+        "mark": {"type": "string", "maxLength": HOOK_MAX},
+    },
+}
+
+CAPTIONS_SCHEMA: Dict[str, Any] = {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["captions"],
+    "properties": {
+        "captions": {
+            "type": "array", "minItems": 1, "maxItems": 12,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["no", "srt_text"],
+                "properties": {
+                    "no": {"type": "integer", "minimum": 1, "maximum": 99},
+                    "srt_text": {"type": "string", "minLength": 4,
+                                 "maxLength": SRT_MAX},
+                },
+            },
+        },
+    },
+}

@@ -489,3 +489,125 @@ pre.out {
   font: 400 var(--t-xs)/1.7 var(--mono); white-space: pre-wrap; word-break: break-word;
   max-height: 420px; overflow-y: auto; flex: 1; min-width: 280px;
 }
+
+/* ── 사실검증 ──────────────────────────────────────────────────────────
+   씬 카드 안에 얹히는 판정. **초록은 조용하고 빨강만 눈에 띈다** — 스물두 씬이
+   전부 OK 초록으로 물들면 NG 하나가 묻힌다. */
+.verify {
+  margin-top: 10px; padding: 10px 12px; border-radius: var(--r-sm);
+  background: var(--ok-wash);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.verify.ng { background: var(--err-wash); box-shadow: inset 0 0 0 1px rgb(var(--err-rgb) / .28); }
+.verify .vtag {
+  font-size: var(--t-2xs); font-weight: 800; letter-spacing: .06em;
+  padding: 2px 7px; border-radius: 999px; color: #fff; background: var(--ok);
+}
+.verify.ng .vtag { background: var(--err); }
+.verify .vreason { font-size: var(--t-xs); color: var(--text-2); }
+
+/* 대안은 **누를 수 있게 생겨야 한다** — 읽고 마는 것이 아니라 고르는 카드다. */
+.verify .alts { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.verify .alt {
+  text-align: left; width: 100%; cursor: pointer;
+  font: inherit; font-size: var(--t-xs); line-height: var(--lh);
+  color: var(--text); background: var(--white);
+  border: 0; border-radius: var(--r-sm); padding: 8px 10px;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.verify .alt:hover { background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent); }
+.verify .alt:disabled { cursor: default; opacity: .55; }
+
+/* ── 한 면 · 세로 순서 ─────────────────────────────────────────────────
+   탭을 없애고 단계를 세로로 폈다. 길어진 값은 이 두 부품이 치른다:
+   위의 건너뛰기 줄과, 구간마다 붙는 번호. */
+.jump {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  position: sticky; top: 0; z-index: 5;
+  margin: 0 0 14px; padding: 8px 0;
+  background: linear-gradient(var(--paper) 72%, transparent);
+}
+.jump-i {
+  font: inherit; font-size: var(--t-xs); font-weight: 700; cursor: pointer;
+  color: var(--text-2); background: var(--bone);
+  border: 0; border-radius: 999px; padding: 5px 11px 5px 9px;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.jump-i::before {
+  content: ""; width: 6px; height: 6px; border-radius: 50%;
+  background: rgb(var(--idle-rgb) / .45);
+}
+/* 끝난 것은 조용하고, **덜 된 것만** 눈에 띈다 — 다 초록이면 남은 일이 묻힌다 */
+.jump-i.done::before { background: var(--ok); }
+.jump-i.part::before { background: var(--accent); }
+.jump-i:hover { color: var(--ink); box-shadow: inset 0 0 0 1px var(--brand-soft); }
+
+.step-card { scroll-margin-top: 56px; }
+.step-head { display: flex; align-items: center; gap: 10px; }
+.step-head h2 { margin: 0; }
+.step-head .sc-no {
+  width: 24px; height: 24px; border-radius: var(--r-sm); flex: none;
+  background: var(--brand); color: #fff;
+  display: grid; place-items: center;
+  font-size: var(--t-2xs); font-weight: 800;
+}
+/* 앞 단계가 덜 됐으면 단추가 죽고 그 옆에 이유가 붙는다 — 눌러서 스택트레이스를
+   보는 것은 고장으로 읽힌다. */
+.step-card .btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ── 현황판 · 장 × MBTI ────────────────────────────────────────────────
+   ★ **끝난 칸이 조용하다.** 완성을 진한 색으로 칠하면 판이 초록으로 덮이고
+     남은 일이 묻힌다. 여기서 눈에 띄어야 하는 것은 「아직 안 한 칸」이다. */
+.boardwrap { overflow-x: auto; margin-top: 4px; }
+table.board { border-collapse: separate; border-spacing: 4px; font-size: var(--t-xs); }
+table.board th {
+  font-weight: 700; color: var(--text-2); text-align: center;
+  padding: 2px 4px; white-space: nowrap;
+}
+table.board th.ch { text-align: left; color: var(--ink); }
+table.board tbody th.ch { font-weight: 700; padding-right: 10px; }
+
+.cellbox {
+  font: inherit; font-size: var(--t-2xs); font-weight: 700;
+  min-width: 62px; padding: 6px 8px; border: 0; border-radius: var(--r-sm);
+  color: var(--text-2); background: var(--bone); cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  display: block; text-align: center;
+}
+.cellbox:hover { box-shadow: inset 0 0 0 1px var(--brand-soft); color: var(--ink); }
+/* 빈 칸 — 만들지도 않은 자리. 누를 것이 없다. */
+.cellbox.none { color: var(--text-3); background: transparent; box-shadow: none; cursor: default; }
+.cellbox.empty { color: var(--accent); background: var(--accent-wash); }
+.cellbox.material { color: var(--text-2); }
+.cellbox.script { color: var(--brand); background: var(--brand-wash); }
+/* 완성은 **테두리로만** 말한다 — 채우면 판을 덮는다 */
+.cellbox.built { color: var(--ok); background: var(--white);
+                 box-shadow: inset 0 0 0 1.5px var(--ok); }
+
+/* 열여섯 열이 서므로 칸을 좁힌다 — 판 전체가 한눈에 들어와야 「남은 것」이 보인다 */
+table.board { border-spacing: 3px; }
+table.board th .ord {
+  display: block; font-size: 9px; font-weight: 800;
+  color: var(--text-3); letter-spacing: .04em;
+}
+table.board th.ch { min-width: 130px; }
+table.board tbody th.ch { display: flex; align-items: baseline; gap: 8px; }
+.chname { font-weight: 700; color: var(--ink); }
+.chdone { font-size: var(--t-2xs); font-weight: 700; color: var(--text-3); }
+.chdone.full { color: var(--ok); }
+
+.cellbox { min-width: 40px; padding: 5px 4px; }
+/* 안 한 칸 — 누르면 그 자리에서 만든다. 판에서 **이것이 가장 눈에 띄어야 한다.** */
+.cellbox.none {
+  color: var(--text-3); background: transparent; cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--hairline-2);
+}
+.cellbox.none:hover:not(:disabled) {
+  color: var(--accent); background: var(--accent-wash);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.cellbox.none:disabled { cursor: default; opacity: .5; }
+.cellbox.source, .cellbox.draft, .cellbox.structure { color: var(--text-2); background: var(--bone); }
+/* 장의 공용 단계(원고·구조) — 유형과 무관하므로 유형 칸과 다른 색으로 조용히 */
+.chmat { font-size: var(--t-2xs); color: var(--text-3); }

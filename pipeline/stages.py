@@ -107,7 +107,7 @@ GROUPS: List[Group] = [
     Group("plan", "대본 만들기", primary=True,
           stages=("source", "draft", "structure",
                   "script", "speech", "tts", "subs", "artspec"),
-          screens=("source", "script"),
+          screens=("plan",),
           hint="원문에서 원고·구조를 뽑고 대본·음성·자막·장면 지시까지. "
                "원고·대본·장면 지시가 크레딧을 씁니다."),
     Group("video", "영상 만들기",
@@ -126,10 +126,17 @@ BY_GROUP: Dict[str, Group] = {g.key: g for g in GROUPS}
 #   「대본」 화면 하나가 탭 다섯 개(대본·발음·음성·자막·장면지시)를 담는다 —
 #   그 다섯은 전부 「대본을 확정하는 일」이고, 오가며 고치는 것이 실제 작업이다.
 SCREENS: List[Screen] = [
-    Screen("source", "재료", ("source", "draft", "structure"),
-           "장(章) 파일을 넣고, 원고로 다시 짜고, 수치·연표·비교를 표로 뽑습니다."),
-    Screen("script", "대본", ("script", "speech", "tts", "subs", "artspec"),
-           "대본을 확정하는 일 전부 — 문구·발음·음성·자막·장면 지시."),
+    # ★ **탭을 없앴다.** 재료·원고·구조·대본·발음·음성·자막·장면지시가 한 면에
+    #   세로로 늘어서고, 생성 단추가 순서대로 나온다.
+    #
+    #   왜 — 탭은 길이를 감추려고 임시로 두른 것이었는데, 감춘 것이 **눌러야 하는
+    #   단추**였다. 「구조 다시 뽑기」를 안 눌렀는데 「대본 다시 쓰기」를 누르면
+    #   구조.json 이 없다고 죽는다. 순서가 곧 일이라면 순서가 보여야 한다.
+    #   길어지는 것은 좌측 레일과 이 면 위의 건너뛰기 줄이 맡는다.
+    # 이름을 묶음(「대본 만들기」)과 다르게 둔다 — 같으면 레일에 같은 말이 두 줄 뜬다
+    Screen("plan", "재료 · 대본",
+           ("source", "draft", "structure", "script", "speech", "tts", "subs", "artspec"),
+           "재료를 갈고 대본을 확정하는 일 전부 — 위에서 아래로 순서대로."),
     Screen("art", "장면 제작", ("art",),
            "아스트라가 움직이는 장면을 코드로 씁니다."),
     Screen("compose", "미리보기", ("compose",),

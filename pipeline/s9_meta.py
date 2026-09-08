@@ -11,10 +11,10 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Dict, Optional
 
-from core import config, paths
+from core import config, paths, persona
 from core.atomic_io import atomic_write_json, atomic_write_text
 from llm import structured
-from . import prompts
+from . import prompts, s1_script
 from .schemas import META_SCHEMA
 
 SYSTEM = (
@@ -42,6 +42,8 @@ def run(slug: str, *, source_line: str = "",
         "meta", title=doc.get("title") or "", script=script_txt,
         hashtags="  ".join(doc.get("hashtags") or []),
         source_line=source_line or book or "(출처 미지정)",
+        # 올릴 글도 같은 무드로 — 대본은 ENFP 톤인데 제목만 하십시오체면 튄다.
+        tone_block=persona.tone_block(*s1_script.read_persona(slug)),
     ), META_SCHEMA, on_activity=on_activity)
 
     build = paths.latest_build(slug)

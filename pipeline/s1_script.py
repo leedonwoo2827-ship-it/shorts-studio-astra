@@ -29,6 +29,7 @@ import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core import config
+from core import persona
 from core.atomic_io import atomic_write_json
 from core import paths
 from llm import structured
@@ -132,6 +133,22 @@ def _fact_ids(struct: Dict[str, Any]) -> set:
     return {str(f.get("id")) for f in (struct.get("facts") or [])}
 
 
+def read_persona(slug: str) -> tuple:
+    """이 프로젝트의 무드. `00_기획/source.json` 의 `mbti` · `mood` 를 읽는다.
+
+    적혀 있지 않으면 빈 값이고, 그러면 예전 그대로 하십시오체로 나간다.
+    """
+    import json as _json
+    p = paths.source_json(slug)
+    if not p.exists():
+        return "", ""
+    try:
+        meta = _json.loads(p.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return "", ""
+    return persona.normalize(meta.get("mbti")), str(meta.get("mood") or "")
+
+
 def run(slug: str, *, cuts: Optional[int] = None, fmt: Optional[str] = None,
         on_activity: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
     """`01_대본/script.json` 을 만들고 그 내용을 돌려준다.
@@ -160,6 +177,8 @@ def run(slug: str, *, cuts: Optional[int] = None, fmt: Optional[str] = None,
         budget_chars=budget, cps=config.get("narration.chars_per_sec", 6.51),
         speed=config.get("narration.speed", 1.2),
         seconds_min=lo, seconds_max=hi, cuts_max=cuts_max,
+        tone_block=persona.tone_block(*read_persona(slug)),
+        indep=persona.INDEP,
     ) + "\n\n---\n\n# 재료\n\n" + digest
 
     if cuts:

@@ -1,17 +1,24 @@
 {
   "port": 8899,
   "auth": "claude-code",
+  "paths": {
+    "_주석": "작업물이 쌓이는 루트. 비우면 레포 안 projects/ 다. 이 PC 값은 config.local.json 에 적는다(SHORTS2_PROJECTS_ROOT 환경변수가 더 세다).",
+    "_왜밖으로": "레포 안에 쌓으면 git pull·재클론이 작업물을 건드린다. 그리고 쇼츠공방 I 이 이미 _series/<시리즈>/output 에 결과를 떨구므로, 한 장(章)의 산출물을 한자리에서 보려면 같은 루트여야 한다.",
+    "projects_root": ""
+  },
   "models": {
     "draft": "claude-sonnet-5",
     "script": "claude-opus-5",
     "meta": "claude-sonnet-5",
-    "artspec": "claude-opus-5"
+    "artspec": "claude-opus-5",
+    "verify": "claude-sonnet-5"
   },
   "effort": {
     "draft": "high",
     "script": "high",
     "meta": "medium",
-    "artspec": "high"
+    "artspec": "high",
+    "verify": "medium"
   },
   "budget_usd": {
     "_주석": "단계마다 드는 값이 다르다. budget_usd.<단계키> 를 적으면 그 단계만 덮는다.",
@@ -21,7 +28,9 @@
     "artspec": 2.5,
     "_뚜껑": "이 값은 쓰는 돈이 아니라 상한이다. 낮게 두면 단계가 중간에 죽고 그때까지 쓴 돈은 그냥 날아간다 — 사슬로 돌릴 때는 넉넉히 두는 편이 싸다.",
     "_원고": "실측 2026-09-08: 16,212자를 읽고 HTML 원고를 통째로 써 내므로 출력 토큰이 커서 공통 상한 $1.5 를 넘겨 죽었다(Reached maximum budget). 모델도 opus 에서 sonnet 으로 내렸다 — 재구성은 창작이 아니라 자리 옮기기다.",
-    "warn_total": 5.0
+    "warn_total": 5.0,
+    "verify": 0.8,
+    "_검증": "사실검증은 판단만 하고 문장을 새로 쓰지 않는다 — 출력 토큰이 작아 대본의 절반이면 넉넉하다. 씬별 검토는 씬 하나만 담아 부르므로 훨씬 싸다."
   },
   "shorts": {
     "_주석": "사람이 정하는 것은 format 과 seconds_min/max 뿐이다. 씬 수·컷 수·항목 수는 전부 파생값이다.",

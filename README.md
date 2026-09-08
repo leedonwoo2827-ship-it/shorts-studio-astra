@@ -4,6 +4,7 @@
 
 ```
 1장.pdf   →   20~30초 · 1080×1920 · mp4
+1장.md    →   (PDF · DOCX · MD · TXT · HTML 다 됩니다)
 ```
 
 정지 그림에 확대·축소를 준 것이 아닙니다. **GPT-6 Astra 가 씬마다 애니메이션
@@ -149,7 +150,8 @@ tools\cli.bat  →  6  (Fill placeholder artwork)
 
 ```
 projects/<slug>/              slug = YYMMDD-제목
-  00_기획/    원본.pdf                      ← 사람이 넣는 것은 이것뿐
+  00_기획/    원본.pdf|.md|.docx|.txt|.html   ← 사람이 넣는 것은 이것뿐
+              (소제목이 이미 잡힌 마크다운이면 「원고」가 할 일이 줄어든다)
               source.md    추출본 (고칠 수 있다)
               원고.html    소제목 복원 + 표 + 도해 골격 (고칠 수 있다)
               구조.json    절·블록·표·골격·**사실 목록** ★

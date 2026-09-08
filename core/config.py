@@ -39,6 +39,8 @@ _DEFAULTS: Dict[str, Any] = {
     "effort": {"draft": "high", "script": "high",
                "artspec": "high", "meta": "medium"},
     "budget_usd": {"per_stage": 1.5, "warn_total": 5.0},
+    # 작업물이 쌓이는 루트. 비워 두면 레포 안 `projects/`.
+    "paths": {"projects_root": ""},
 }
 
 # 환경변수로 덮을 수 있는 것만 — 나머지는 파일로만 바꾼다
@@ -46,6 +48,7 @@ _ENV = {
     "SHORTS_PORT": ("port", int),
     "SHORTS_FORMAT": ("shorts.format", str),
     "SHORTS_TTS_ENGINE": ("tts.engine", str),
+    "SHORTS2_PROJECTS_ROOT": ("paths.projects_root", str),
 }
 
 

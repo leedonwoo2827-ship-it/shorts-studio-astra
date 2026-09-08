@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import zlib
@@ -23,10 +24,10 @@ from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
                                PlainTextResponse)
 from fastapi.staticfiles import StaticFiles
 
-from core import access, config, console, paths
+from core import access, config, console, paths, persona
 from core.atomic_io import atomic_write_json, atomic_write_text
 from core.jobs import get_registry
-from pipeline import runner, s2_speech, s4_subs, stages
+from pipeline import runner, s1b_revise, s2_speech, s4_subs, stages
 
 ROOT = Path(__file__).resolve().parent
 REG = get_registry()
@@ -42,6 +43,14 @@ def _need(slug: str) -> str:
     if slug not in paths.list_projects():
         raise HTTPException(404, f"그런 프로젝트가 없습니다: {slug}")
     return slug
+
+
+async def _json_body(request: Request) -> Dict[str, Any]:
+    """몸이 비어 있어도 죽지 않는다. 화면이 인자 없이 부르는 자리가 있다."""
+    try:
+        return await request.json() or {}
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 def _script(slug: str) -> Dict[str, Any]:
@@ -130,7 +139,8 @@ def create_app() -> FastAPI:
     @app.post("/api/projects")
     async def new_project(file: UploadFile = File(...),
                           title: str = Form(""),
-                          fmt: str = Form("")) -> Dict[str, Any]:
+                          fmt: str = Form(""),
+                          mbti: str = Form("")) -> Dict[str, Any]:
         """새 프로젝트. **씬 수를 받지 않는다** — 형식만 받고 나머지는 파생값이다.
 
         예전에는 여기서 `cuts` 를 받아 프롬프트에 「씬 수는 N개다」로 박았고,
@@ -147,6 +157,10 @@ def create_app() -> FastAPI:
             "format": (fmt or config.get("shorts.format", "narrative")).strip(),
             "voice": config.get("narration.voice", "F2"),
             "speed": config.get("narration.speed", 1.2),
+            # 무드를 **만들 때** 받는다. 대본을 뽑고 나서 고르면 그 대본이 무드
+            # 없이 나온 것이라 다시 뽑아야 하고, 대본은 크레딧을 쓰는 단계다.
+            "mbti": persona.normalize(mbti),
+            "mood": persona.mood(mbti),
         }, indent=2)
         return {"slug": slug, "file": name}
 
@@ -394,6 +408,170 @@ def create_app() -> FastAPI:
         _need(slug)
         p = paths.srt(slug)
         return p.read_text(encoding="utf-8-sig") if p.exists() else ""
+
+    # ── 대본 다듬기 — 검증 · 후크 다시 · 자막 다시 ──────────────────────
+    # ★ 이 넷은 **단계가 아니다.** 레일에 줄을 늘리지 않고 「대본」 화면 안에
+    #   머문다. 대본을 확정하는 일은 오가며 고치는 일이라, 단계로 만들면
+    #   앞뒤 단계를 낡게 만들어(invalidates) 음성·자막이 매번 다시 굽는다.
+    #   자막을 실제로 바꾸는 둘(자막 다시 · 대안 적용)만 그 씬의 발음을 버린다.
+
+    @app.post("/api/projects/{slug}/verify")
+    async def run_verify(slug: str, request: Request) -> Dict[str, Any]:
+        """사실검증. `{"only": [3]}` 을 주면 그 씬만 — 씬별 「검토」가 이 길이다.
+
+        ★ **고치지 않는다.** 판단과 대안만 돌려주고, 무엇을 쓸지는 사람이 고른다.
+        """
+        _need(slug)
+        body = await _json_body(request)
+        only = body.get("only") or None
+        return s1b_revise.verify(slug, only=[int(n) for n in only] if only else None)
+
+    @app.post("/api/projects/{slug}/verify/apply")
+    async def apply_verify_alt(slug: str, request: Request) -> Dict[str, Any]:
+        """사람이 고른 대안을 그 씬에 넣는다. 방어망의 마지막 관문이다."""
+        _need(slug)
+        body = await _json_body(request)
+        try:
+            out = s1b_revise.apply_alt(slug, int(body.get("no") or 0),
+                                       str(body.get("text") or ""))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        out["subs"] = s4_subs.run(slug)      # 자막이 바뀌면 큐를 다시 나눈다
+        return out
+
+    @app.post("/api/projects/{slug}/hooks/regen")
+    def regen_hooks(slug: str) -> Dict[str, Any]:
+        _need(slug)
+        return s1b_revise.regen_hooks(slug)
+
+    @app.post("/api/projects/{slug}/captions/regen")
+    async def regen_captions(slug: str, request: Request) -> Dict[str, Any]:
+        _need(slug)
+        body = await _json_body(request)
+        only = body.get("only") or None
+        out = s1b_revise.regen_captions(
+            slug, only=[int(n) for n in only] if only else None)
+        if out.get("touched"):
+            out["subs"] = s4_subs.run(slug)
+        return out
+
+    @app.put("/api/projects/{slug}/persona")
+    async def put_persona(slug: str, request: Request) -> Dict[str, Any]:
+        """이 프로젝트의 무드(MBTI). `00_기획/source.json` 에 적는다.
+
+        ★ 무드를 씬에 저장하지 않는다. 같은 장(章)을 열여섯 유형으로 내보내는 것이
+          캠페인 방식이라, 원고는 장별로만 있고 무드는 **생성 시점에** 입힌다.
+        """
+        _need(slug)
+        body = await _json_body(request)
+        who = persona.normalize(body.get("mbti"))
+
+        # ★ 무드를 바꾸는 것은 **유형 폴더를 갈아타는 것**이다. 옛 유형의 대본·음성은
+        #   제 폴더에 그대로 남는다 — 덮어쓰지 않으므로 되돌아올 수 있다.
+        paths.set_variant(slug, paths.variant_tag(who))
+
+        p = paths.source_json(slug)
+        meta = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+        meta["mbti"] = who
+        meta["mood"] = str(body.get("mood") or "").strip() or persona.mood(who)
+        atomic_write_json(str(p), meta, indent=2)
+        return {"mbti": who, "mood": meta["mood"], "variant": paths.variant(slug),
+                "variants": paths.variants(slug),
+                "tone": persona.tone_block(who, meta["mood"])}
+
+    @app.get("/api/persona")
+    def list_persona() -> Dict[str, Any]:
+        """16유형과 무드 한 줄. 화면의 고르개가 이것으로 그려진다."""
+        return {"order": persona.ROUND_ORDER, "moods": persona.MOODS}
+
+    @app.post("/api/projects/{slug}/fork")
+    async def fork_project(slug: str, request: Request) -> Dict[str, Any]:
+        """같은 장(章)에서 **다른 유형을 연다.**
+
+        ★ 폴더를 복사하지 않는다. 한 장이 한 폴더이고 `00_기획`(원고·구조)은 공용이라,
+          유형을 하나 더 내는 일은 `01_대본/04ESTP/` 같은 빈 칸을 여는 것뿐이다.
+          원고 오타를 고치면 열여섯 유형이 같이 고쳐진다 — 복사본이 없기 때문이다.
+
+        ★ 무드를 타는 것은 대본부터다. 그래서 크레딧은 「대본」에서 처음 든다.
+        """
+        _need(slug)
+        body = await _json_body(request)
+        who = persona.normalize(body.get("mbti"))
+        if not who:
+            raise HTTPException(400, "MBTI 16유형 중 하나를 주세요.")
+        tag = paths.variant_tag(who)
+
+        p = paths.source_json(slug)
+        meta = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+        paths.set_variant(slug, tag)          # 폴더를 만들고 그리로 갈아탄다
+        meta["mbti"] = who
+        meta["mood"] = persona.mood(who)
+        atomic_write_json(str(p), meta, indent=2)
+        return {"slug": slug, "mbti": who, "variant": tag,
+                "variants": paths.variants(slug)}
+
+    # ── 현황판 — 장 × MBTI ────────────────────────────────────────────
+    # ★ 쇼츠공방 I 의 캠페인 목록을 이 레포가 아는 것만으로 다시 세운다. 그쪽
+    #   SQLite 를 읽지 않는다 — 두 앱이 한 파일을 물면 잠금과 스키마가 얽힌다.
+    #   여기서는 **작업물 폴더가 곧 진실**이다. 폴더를 옮기면 현황도 같이 간다.
+    #
+    # ★ 전 MBTI 를 한 판에 세우지 않는다. 프로젝트가 장별로 갈려 있어서 한 칸이
+    #   한 폴더다 — 없는 칸은 「아직」이고, 그것을 만드는 것은 사람이 정한다.
+
+    @app.get("/api/board")
+    def board() -> Dict[str, Any]:
+        rows: List[Dict[str, Any]] = []
+        for slug in paths.list_projects():
+            meta_p = paths.source_json(slug)
+            meta = {}
+            if meta_p.exists():
+                try:
+                    meta = json.loads(meta_p.read_text(encoding="utf-8"))
+                except Exception:  # noqa: BLE001
+                    meta = {}
+            try:
+                ch = int(meta.get("chapter"))
+            except (TypeError, ValueError):
+                continue
+
+            # ★ 진실은 **폴더**다. `01_대본` 밑에 있는 유형 폴더가 곧 「만든 것」이고,
+            #   없는 유형은 아직 안 만든 것이다. 별도 장부를 두지 않는다.
+            cells: Dict[str, Any] = {}
+            for tag in paths.variants(slug):
+                who = tag[2:] if len(tag) > 2 else tag       # `03ENFP` → `ENFP`
+                who = persona.normalize(who)
+                if not who:
+                    continue
+                d = paths.project(slug)
+                sc = d / paths.SCRIPT / tag / "script.json"
+                n = 0
+                if sc.exists():
+                    try:
+                        n = len(json.loads(sc.read_text(encoding="utf-8")).get("scenes") or [])
+                    except Exception:  # noqa: BLE001
+                        n = 0
+                done = d / paths.DONE / tag
+                builds = sorted((x for x in done.glob("v*") if x.is_dir()),
+                                key=lambda x: x.name) if done.is_dir() else []
+                cells[who] = {
+                    "slug": slug, "tag": tag, "scenes": n,
+                    "state": "built" if builds else ("script" if n else "empty"),
+                    "builds": len(builds),
+                    "build": builds[-1].name if builds else "",
+                }
+
+            rows.append({
+                "chapter": ch, "slug": slug,
+                "title": str(meta.get("title") or f"{ch}장"),
+                # 원고가 어디까지 왔는지 — 유형과 무관한 공용 단계다
+                "material": ("structure" if paths.structure_json(slug).exists()
+                             else "draft" if paths.draft_html(slug).exists()
+                             else "source" if paths.source_md(slug).exists() else "empty"),
+                "current": paths.variant(slug),
+                "cells": cells,
+            })
+        rows.sort(key=lambda r: r["chapter"])
+        return {"order": persona.ROUND_ORDER, "moods": persona.MOODS, "chapters": rows}
 
     # ── 편의 ──────────────────────────────────────────────────────────────
     @app.post("/api/projects/{slug}/open")
