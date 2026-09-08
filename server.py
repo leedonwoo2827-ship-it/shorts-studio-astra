@@ -188,6 +188,9 @@ def create_app() -> FastAPI:
         table = stages.as_json(slug)
         return {
             "slug": slug,
+            # 지금 보고 있는 유형과, 이 장에 만들어져 있는 유형들
+            "variant": paths.variant(slug),
+            "variants": paths.variants(slug),
             "groups": table["groups"],
             "screens": table["screens"],
             "meta": json.loads(meta.read_text(encoding="utf-8")) if meta.exists() else {},
@@ -211,11 +214,47 @@ def create_app() -> FastAPI:
         }
 
     @app.delete("/api/projects/{slug}")
-    def delete_project(slug: str) -> Dict[str, Any]:
+    def delete_project(slug: str, confirm: str = "") -> Dict[str, Any]:
+        """장 하나를 통째로 지운다 — **원고와 열여섯 유형이 전부 사라진다.**
+
+        ★ 이름을 그대로 받아 적어야 지운다. 한 장 폴더가 이제 그 장의 모든 유형을
+          담고 있어서, 실수로 누르면 한 유형이 아니라 **한 바퀴치가 날아간다.**
+          유형 하나만 버리려면 아래 `variant` 쪽을 쓴다.
+        """
         _need(slug)
+        if confirm != slug:
+            raise HTTPException(400,
+                                f"이 장을 통째로 지웁니다(원고와 모든 유형). "
+                                f"확인하려면 이름을 그대로 보내세요: {slug}")
         import shutil
         shutil.rmtree(paths.project(slug))
         return {"deleted": slug}
+
+    @app.delete("/api/projects/{slug}/variants/{tag}")
+    def delete_variant(slug: str, tag: str) -> Dict[str, Any]:
+        """유형 하나만 버린다 — `01_대본/03ENFP` 부터 `06_완성/03ENFP` 까지.
+
+        ★ **`00_기획` 은 건드리지 않는다.** 원고와 구조는 그 장의 공용이라, 유형
+          하나를 버린다고 없어지면 나머지 열다섯이 같이 죽는다.
+        """
+        _need(slug)
+        tag = (tag or "").strip()
+        if not tag or "/" in tag or "\\" in tag or tag.startswith("."):
+            raise HTTPException(400, f"이상한 이름입니다: {tag!r}")
+
+        import shutil
+        removed = []
+        for k in paths.VARIANT_DIRS:
+            d = paths.project(slug) / k / tag
+            if d.is_dir():
+                shutil.rmtree(d)
+                removed.append(f"{k}/{tag}")
+        # 지금 보고 있던 유형을 버렸으면 남은 것 중 하나로 옮겨 탄다
+        if paths.variant(slug) == tag:
+            rest = paths.variants(slug)
+            paths.set_variant(slug, rest[0] if rest else "")
+        return {"slug": slug, "removed": removed,
+                "variants": paths.variants(slug), "current": paths.variant(slug)}
 
     # ── 단계 실행 ─────────────────────────────────────────────────────────
     @app.post("/api/projects/{slug}/stages/{key}/run")
@@ -346,6 +385,87 @@ def create_app() -> FastAPI:
         if touched:
             out["subs"] = s4_subs.run(slug)
         return out
+
+    @app.delete("/api/projects/{slug}/scenes/{no}")
+    def delete_scene(slug: str, no: int) -> Dict[str, Any]:
+        """씬 하나를 버린다. **뒤 번호를 당기고 딸린 것을 같이 치운다.**
+
+        ★ 씬 번호는 곧 파일 이름이다(`02_음성/003.wav` · `04_장면/003.svg`).
+          씬 4 를 지우고 번호만 당기면 옛 5번 음성이 새 4번 자리에 남아, 화면은
+          맞는데 소리가 한 칸씩 밀린다 — **조용히 틀리는** 종류의 사고다.
+          그래서 딸린 파일도 같이 옮긴다.
+
+        ★ 마지막 한 씬은 못 지운다. 씬이 없는 대본은 대본이 아니다.
+        """
+        _need(slug)
+        doc = _script(slug)
+        scenes = list(doc.get("scenes") or [])
+        if len(scenes) <= 1:
+            raise HTTPException(400, "마지막 씬은 지울 수 없습니다.")
+        if not any(int(x.get("no") or 0) == int(no) for x in scenes):
+            raise HTTPException(404, f"씬 {no} 가 없습니다.")
+
+        gone = int(no)
+        kept = [x for x in scenes if int(x.get("no") or 0) != gone]
+
+        # 딸린 파일을 먼저 치운다 — 번호를 당기기 전이라 옛 번호로 찾을 수 있다.
+        import os
+        removed: List[str] = []
+        for d, pat in ((paths.audio_dir(slug), "{n:03d}.wav"),
+                       (paths.art_dir(slug), None)):
+            if not d.is_dir():
+                continue
+            if pat:
+                f = d / pat.format(n=gone)
+                if f.exists():
+                    f.unlink(); removed.append(f.name)
+            else:
+                for f in list(d.glob(f"{gone:03d}.*")):
+                    f.unlink(); removed.append(f.name)
+
+        # 뒤 번호를 한 칸씩 당긴다. **작은 번호부터** 옮겨야 덮어쓰지 않는다.
+        for x in kept:
+            old_no = int(x.get("no") or 0)
+            if old_no <= gone:
+                continue
+            new_no = old_no - 1
+            for d, ext in ((paths.audio_dir(slug), ".wav"), (paths.art_dir(slug), None)):
+                if not d.is_dir():
+                    continue
+                srcs = ([d / f"{old_no:03d}{ext}"] if ext
+                        else list(d.glob(f"{old_no:03d}.*")))
+                for f in srcs:
+                    if f.exists():
+                        os.replace(f, d / f"{new_no:03d}{f.suffix}")
+            x["no"] = new_no
+
+        doc["scenes"] = kept
+        # 판정은 씬 번호를 키로 들고 있다 — 번호가 밀렸으니 통째로 버린다.
+        # 살려 두면 다른 문장에 붙은 옛 판정이 남는다.
+        doc.pop("verify", None)
+        atomic_write_json(str(paths.script_json(slug)), doc, indent=2)
+        return {"deleted": gone, "scenes": len(kept), "removed_files": removed,
+                "subs": s4_subs.run(slug)}
+
+    @app.put("/api/projects/{slug}/hook")
+    async def put_hook(slug: str, request: Request) -> Dict[str, Any]:
+        """상단 고정 후크. **영상 내내 바뀌지 않는 두 줄이다.**
+
+        ★ 씬마다 갈리지 않는다 — 보다 들어온 사람이 무슨 영상인지 알아야 한다.
+          그래서 값은 `hook_fixed` 한 곳에 두고, 씬별 `hook_line1/2` 는 그것을
+          따라가게 맞춘다. 두 자리가 어긋나면 서사형에서 화면 위 띠가 씬마다 튄다.
+        """
+        _need(slug)
+        body = await _json_body(request)
+        doc = _script(slug)
+        line1 = str(body.get("line1") or "").strip()
+        line2 = str(body.get("line2") or "").strip()
+        mark = str(body.get("mark") or "").strip()
+        doc["hook_fixed"] = {"line1": line1, "line2": line2, "mark": mark}
+        for sc in doc.get("scenes") or []:
+            sc["hook_line1"], sc["hook_line2"] = line1, line2
+        atomic_write_json(str(paths.script_json(slug)), doc, indent=2)
+        return {"hook_fixed": doc["hook_fixed"]}
 
     @app.get("/api/projects/{slug}/pron", response_class=PlainTextResponse)
     def get_pron(slug: str) -> str:

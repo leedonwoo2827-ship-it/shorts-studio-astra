@@ -12,6 +12,8 @@
  */
 "use strict";
 
+// ①~⑩. 화면 산출물의 진행 레일과 같은 글자를 쓴다.
+const CIRCLED = ["", "①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"];
 const NL = String.fromCharCode(10);   // 스크립트로 이 파일을 고칠 때
                                       // escape 가 벗겨지는 사고를 막는다
 const $ = (s) => document.querySelector(s);
@@ -323,6 +325,37 @@ function saveBtn(url, ta) {
   return save;
 }
 
+/* ── 사실검증 ─────────────────────────────────────────────────────────
+   ★ **AI 는 고치지 않는다.** 판정과 대안만 그리고, 적용은 사람이 누른다.
+     자동으로 갈아 끼우면 손으로 다듬어 놓은 문장까지 덮어쓴다. */
+function verifyBox(no, v) {
+  const box = el("div", "verify " + (v.ok ? "ok" : "ng"));
+  box.appendChild(row(
+    el("span", "vtag", v.ok ? "OK" : "NG"),
+    el("span", "vreason", v.reason || (v.ok ? "근거와 맞습니다" : "")),
+  ));
+  if ((v.alts || []).length) {
+    const alts = el("div", "alts");
+    alts.appendChild(el("div", "hint", "대안을 누르면 그 문장으로 바뀝니다."));
+    v.alts.forEach((t) => {
+      const a = el("button", "alt", t);
+      a.type = "button";
+      a.disabled = !!S.cfg?.readonly;
+      a.onclick = async () => {
+        a.disabled = true;
+        try {
+          await post(`/api/projects/${encodeURIComponent(S.slug)}/verify/apply`, { no, text: t });
+          await loadProject(S.slug);
+          render();
+        } catch (e) { alert(e.message); a.disabled = false; }
+      };
+      alts.appendChild(a);
+    });
+    box.appendChild(alts);
+  }
+  return box;
+}
+
 /* 씬 편집 — **한 씬이 한 줄이다.**
  *
  * ★ 예전에는 한 씬이 세로로 쌓인 칸 여럿이었다. 스물두 씬이면 화면이 스물두 번
@@ -384,7 +417,7 @@ function sceneEditor(d, { showSource, showNarration, showVerify, showArt } = {})
     meta.appendChild(el("span", "no", String(s.no)));
     meta.appendChild(el("span", "role", s.role || "body"));
     if (showVerify) {
-      const vb = el("button", "btn sm", "\u{1F50E} 검토");
+      const vb = el("button", "btn sm", "① 검토");
       vb.type = "button";
       vb.disabled = ro;
       vb.onclick = async () => {
@@ -393,7 +426,7 @@ function sceneEditor(d, { showSource, showNarration, showVerify, showArt } = {})
           await post(`/api/projects/${enc}/verify`, { only: [s.no] });
           await loadProject(S.slug); render();
         } catch (e) {
-          alert(e.message); vb.disabled = false; vb.textContent = "\u{1F50E} 검토";
+          alert(e.message); vb.disabled = false; vb.textContent = "① 검토";
         }
       };
       meta.appendChild(vb);
@@ -440,7 +473,7 @@ function sceneEditor(d, { showSource, showNarration, showVerify, showArt } = {})
     }
     // ★ 씬 하나만 다시 굽는다. 스물두 씬을 통째로 굽지 않아도 되는 이유는
     //   s3_tts 가 처음부터 `only` 를 받게 되어 있었기 때문이다.
-    const bake = el("button", "btn sm", "굽기");
+    const bake = el("button", "btn sm", "② 굽기");
     bake.type = "button";
     bake.disabled = ro || (S.job && S.job.status === "running");
     bake.title = "이 씬의 음성만 다시 만듭니다.";
@@ -449,7 +482,7 @@ function sceneEditor(d, { showSource, showNarration, showVerify, showArt } = {})
 
     // 장면 제작 화면에서만 — 여기서 아끼는 것이 아스트라 한도를 아끼는 것이다
     if (showArt) {
-      const one = el("button", "btn sm money", "장면");
+      const one = el("button", "btn sm money", "③ 장면");
       one.type = "button";
       one.disabled = ro || (S.job && S.job.status === "running");
       one.title = "이 씬의 장면만 아스트라에게 다시 받습니다 (약 2분 30초).";
@@ -523,7 +556,9 @@ function stepCard(key, n, hint) {
   c.id = "sec-" + key;
 
   const h = el("div", "step-head");
-  h.appendChild(el("span", "sc-no", String(n)));
+  // ★ 원숫자로 적는다. 화면 산출물의 진행 레일도 ①~⑧ 을 쓰고, 「1」 은 다른
+  //   숫자(씬 번호·초)와 섞여 읽히는데 「①」 은 순서로만 읽힌다.
+  h.appendChild(el("span", "sc-no", CIRCLED[n] || String(n)));
   h.appendChild(el("h2", null, st.name || key));
   if (st.costs) h.appendChild(Object.assign(el("span", "cost", "$"),
     { title: "크레딧을 씁니다" }));
@@ -750,6 +785,7 @@ PAGES.plan = async (m) => {
     }
     m.appendChild(c);
   }
+};
 
 
 /* ══ 스토리보드 — 대본이 씬으로 서는 자리 ═════════════════════════════
@@ -781,65 +817,113 @@ PAGES.storyboard = async (m) => {
     ["sec-artspec", "장면 지시", stt("artspec")],
   ]));
 
-  /* ── 5 · 씬 — 자막·발음·판정을 한자리에서 ────────────────────────── */
-    const rc = card("다듬기",
-      "대본을 새로 쓰지 않고 손질만 합니다. 검증은 고치지 않고 대안만 냅니다.");
-    rc.id = "sec-scenes";
-    const busy = (btn, label, fn) => {
-      btn.type = "button";
-      btn.disabled = !!S.cfg?.readonly;
-      btn.onclick = async () => {
-        const t = btn.textContent;
-        btn.disabled = true; btn.textContent = label;
-        try { await fn(); await loadProject(S.slug); render(); }
-        catch (e) { alert(e.message); btn.disabled = false; btn.textContent = t; }
-      };
-      return btn;
+  /* ── 다듬기 — 대본을 새로 쓰지 않고 손질만 ────────────────────────── */
+  const rc = card("다듬기",
+    "대본을 새로 쓰지 않고 손질만 합니다. 검증은 고치지 않고 대안만 냅니다.");
+  rc.id = "sec-scenes";
+  const busy = (btn, label, fn) => {
+    btn.type = "button";
+    btn.disabled = !!S.cfg?.readonly;
+    btn.onclick = async () => {
+      const t = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = label;
+      try {
+        await fn();
+        await loadProject(S.slug);
+        render();
+      } catch (e) {
+        alert(e.message);
+        btn.disabled = false;
+        btn.textContent = t;
+      }
     };
-    const u = `/api/projects/${enc}`;
-    rc.appendChild(row(
-      busy(el("button", "btn primary", "전체 사실검증"), "검증 중…",
-        () => post(`${u}/verify`)),
-      busy(el("button", "btn", "AI 후크 다시"), "후크 다시…",
-        () => post(`${u}/hooks/regen`)),
-      busy(el("button", "btn", "AI 자막 다시"), "자막 다시…",
-        () => post(`${u}/captions/regen`)),
-    ));
-    const ng = Object.entries(d.verify || {}).filter(([, v]) => !v.ok);
-    const seen = Object.keys(d.verify || {}).length;
-    rc.appendChild(el("div", "hint", seen
-      ? (ng.length
-        ? `검증한 ${seen}씬 중 ${ng.length}씬이 NG 입니다 — 씬 ${ng.map(([k]) => k).join(", ")}.`
-        : `검증한 ${seen}씬 모두 근거와 맞습니다.`)
-      : "아직 검증하지 않았습니다. 자막을 고친 뒤에는 다시 돌리세요."));
-    rc.appendChild(el("div", "hint",
-      "「AI 자막 다시」는 씬 전체를 한 번에 다시 씁니다 — 하나씩 고치면 이웃이 "
-      + "어색해져 끝나지 않습니다. 바뀐 씬은 음성이 낡으므로 「음성」을 다시 돌리세요."));
-    m.appendChild(rc);
+    return btn;
+  };
+  const u = `/api/projects/${enc}`;
+  rc.appendChild(row(
+    busy(el("button", "btn primary", "전체 사실검증"), "검증 중…", () => post(`${u}/verify`)),
+    busy(el("button", "btn", "AI 후크 다시"), "후크 다시…", () => post(`${u}/hooks/regen`)),
+    busy(el("button", "btn", "AI 자막 다시"), "자막 다시…", () => post(`${u}/captions/regen`)),
+  ));
+  const ng = Object.entries(d.verify || {}).filter(([, v]) => !v.ok);
+  const seen = Object.keys(d.verify || {}).length;
+  rc.appendChild(el("div", "hint", seen
+    ? (ng.length
+      ? `검증한 ${seen}씬 중 ${ng.length}씬이 NG 입니다 — 씬 ${ng.map(([k]) => k).join(", ")}.`
+      : `검증한 ${seen}씬 모두 근거와 맞습니다.`)
+    : "아직 검증하지 않았습니다. 자막을 고친 뒤에는 다시 돌리세요."));
+  rc.appendChild(el("div", "hint",
+    "「AI 자막 다시」는 씬 전체를 한 번에 다시 씁니다 — 하나씩 고치면 이웃이 어색해져 "
+    + "끝나지 않습니다. 바뀐 씬은 음성이 낡으므로 「음성」을 다시 돌리세요."));
+  m.appendChild(rc);
 
-    // 씬 목록은 **하나뿐이다.** 자막·발음·근거·판정을 한 씬 카드 안에서 본다.
-    m.appendChild(sceneEditor(d, { showSource: true, showNarration: true, showVerify: true }));
-  }
+  /* ── 후크 — 영상 내내 고정인 두 줄 ────────────────────────────────
+     ★ **하나로 통일했다.** 씬마다 후크 칸을 두면 어느 쪽이 화면에 나가는지
+       사람이 알 수 없고, 씬마다 갈리면 보다 들어온 사람이 무슨 영상인지 모른다.
+       여기서 고치면 모든 씬이 그것을 따라간다. */
+  const hf = d.hook_fixed || {};
+  const hc = card("후크",
+    "화면 위 띠에 얹혀 영상 내내 바뀌지 않습니다. 한 줄 12자, 마침표 없이. "
+    + "첫 줄은 상황을 세우고(잉크색), 둘째 줄이 뒤집습니다(주황).");
+  const hi = [];
+  const hrow = el("div", "row");
+  [["line1", hf.line1, "1줄 · 상황 (12자)"], ["line2", hf.line2, "2줄 · 뒤집기 (12자)"]]
+    .forEach(([k, v, ph]) => {
+      const inp = Object.assign(document.createElement("input"),
+        { type: "text", value: v || "", maxLength: 12, placeholder: ph });
+      inp.className = "grow";
+      inp.disabled = !!S.cfg?.readonly;
+      hi.push([k, inp]);
+      hrow.appendChild(inp);
+    });
+  const hsave = el("button", "btn primary", "후크 저장");
+  hsave.type = "button";
+  hsave.disabled = !!S.cfg?.readonly;
+  hsave.onclick = async () => {
+    hsave.disabled = true;
+    try {
+      const body = { mark: hf.mark || "" };
+      hi.forEach(([k, inp]) => { body[k] = inp.value; });
+      await put(`${u}/hook`, body);
+      await loadProject(S.slug);
+      render();
+    } catch (e) {
+      alert(e.message);
+      hsave.disabled = false;
+    }
+  };
+  hrow.appendChild(hsave);
+  hc.appendChild(hrow);
+  m.appendChild(hc);
 
-  /* ── 6 · 발음 ─────────────────────────────────────────────────────── */
+  // 씬 목록은 **하나뿐이다.** 자막·발음·근거·판정을 한 씬 줄 안에서 본다.
+  m.appendChild(sceneEditor(d, { showSource: true, showNarration: true, showVerify: true }));
+
+  /* ── 발음 ─────────────────────────────────────────────────────────── */
   {
-    const c = stepCard("speech", 5,
+    const c = stepCard("speech", 1,
       "괄호를 걷고, 문장 끝을 다듬고, 숫자와 영문을 소리대로. 크레딧이 들지 않습니다. "
       + "자막은 그대로 두고 읽는 글자만 바꿉니다.");
     c.appendChild(runRow("speech", "규칙 다시 적용"));
     const ta = document.createElement("textarea");
-    ta.rows = 8; ta.value = "불러오는 중…";
-    api(`/api/projects/${enc}/pron`).then((t) => { ta.value = t; })
-      .catch(() => { ta.value = ""; });
+    ta.rows = 8;
+    ta.value = "불러오는 중…";
+    api(`${u}/pron`).then((t) => { ta.value = t; }).catch(() => { ta.value = ""; });
     const save = el("button", "btn primary", "저장하고 적용");
     save.type = "button";
     save.disabled = !!S.cfg?.readonly;
     save.onclick = async () => {
       save.disabled = true;
       try {
-        await put(`/api/projects/${enc}/pron`, ta.value, true);
-        await loadProject(S.slug); render();
-      } catch (e) { alert(e.message); } finally { save.disabled = false; }
+        await put(`${u}/pron`, ta.value, true);
+        await loadProject(S.slug);
+        render();
+      } catch (e) {
+        alert(e.message);
+      } finally {
+        save.disabled = false;
+      }
     };
     c.appendChild(el("div", "hint",
       "발음교정표 — 규칙이 못 잡는 것만 적습니다. 적힌 씬은 규칙을 건너뛰고 적힌 대로 읽습니다."));
@@ -848,11 +932,11 @@ PAGES.storyboard = async (m) => {
     m.appendChild(c);
   }
 
-  /* ── 7 · 음성 ─────────────────────────────────────────────────────── */
+  /* ── 음성 — **실측 길이가 씬 길이를 정한다** ───────────────────────── */
   {
-    const c = stepCard("tts", 6,
+    const c = stepCard("tts", 2,
       `엔진 ${S.cfg?.tts?.engine || "?"} · 목소리 ${d.voice || "F2"} · ${d.speed || 1.2}배속`
-      + " — 발음이 그대로인 씬은 다시 굽지 않습니다.");
+      + " — 발음이 그대로인 씬은 다시 굽지 않습니다. 씬 하나만 다시 구우려면 위 씬 줄의 「굽기」를 쓰세요.");
     const tot = d.audio_total_sec || 0;
     const tgt = d.seconds || 22;
     if (tot) {
@@ -867,28 +951,28 @@ PAGES.storyboard = async (m) => {
     m.appendChild(c);
   }
 
-  /* ── 8 · 자막 — 대본에서 파생된 결과다 ───────────────────────────── */
+  /* ── 자막 — 대본에서 파생된 결과다 ────────────────────────────────── */
   {
-    const c = stepCard("subs", 7,
+    const c = stepCard("subs", 3,
       "자막은 따로 쓰는 글이 아닙니다 — 위 씬의 「자막(= 말)」을 읽을 수 있는 조각으로 "
       + "쪼개고, 실측 음성 길이를 글자 수 비율로 나눈 결과입니다 — 조각 하나가 한 컷입니다.");
     c.appendChild(runRow("subs", "자막 다시 나누기"));
     const pre = Object.assign(el("pre", "out"), { textContent: "불러오는 중…" });
-    api(`/api/projects/${enc}/srt`)
+    api(`${u}/srt`)
       .then((t) => { pre.textContent = t || "(아직 없음)"; })
       .catch(() => { pre.textContent = "(아직 없음)"; });
     c.appendChild(pre);
     m.appendChild(c);
   }
 
-  /* ── 9 · 장면 지시 ────────────────────────────────────────────────── */
+  /* ── 장면 지시 ────────────────────────────────────────────────────── */
   {
-    const c = stepCard("artspec", 8,
+    const c = stepCard("artspec", 4,
       "장면 안에 글자를 넣지 않습니다. 위아래 띠는 비워 둡니다. "
       + "동작은 한 방향으로 한 번만 — 되풀이하면 화면이 안절부절못합니다.");
     c.appendChild(runRow("artspec", "지시 만들기"));
     const pre = Object.assign(el("pre", "out"), { textContent: "불러오는 중…" });
-    api(`/api/projects/${enc}/artspec`)
+    api(`${u}/artspec`)
       .then((j) => {
         if (!j || !j.scenes || !j.scenes.length) { pre.textContent = "(아직 없음)"; return; }
         pre.textContent = j.scenes.map((r) => [
@@ -906,7 +990,7 @@ PAGES.storyboard = async (m) => {
             : "",
           r.support ? `  거듦 : ${r.support}` : "",
           r.palette_note ? `  색   : ${r.palette_note}` : "",
-        ].filter(Boolean).join("\n")).join("\n\n");
+        ].filter(Boolean).join(NL)).join(NL + NL);
         (j.warnings || []).forEach((w) => c.appendChild(el("div", "note", w)));
       })
       .catch(() => { pre.textContent = "(아직 없음)"; });

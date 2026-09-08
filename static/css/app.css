@@ -687,3 +687,26 @@ table.board tbody th.ch { display: flex; align-items: baseline; gap: 8px; }
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   font-size: 9px; color: var(--text-3);
 }
+
+/* 구간의 「돌고 있다 / 끝났다」 — 점 하나로는 안 보인다.
+   ★ **끝난 것은 조용하고 도는 것만 눈에 띈다.** 아홉 구간이 전부 초록으로 물들면
+     지금 봐야 할 자리가 묻힌다. */
+.step-card.done { box-shadow: inset 0 0 0 1px var(--hairline); }
+.step-card.busy { box-shadow: inset 0 0 0 1.5px var(--brand-soft); }
+.pill.busy {
+  background: var(--brand-wash); color: var(--brand);
+  box-shadow: inset 0 0 0 1px var(--brand-soft);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+.jump-i.busy { color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand-soft); }
+.jump-i.busy::before { background: var(--brand); animation: pulse 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .pill.busy, .jump-i.busy::before { animation: none; } }
+
+/* 되돌릴 수 없는 단추 — **평소엔 조용하고 손이 닿을 때만 붉다.**
+   늘 빨간 단추가 있으면 눈이 익어서 정작 위험할 때 안 보인다. */
+.btn.danger { color: var(--err); }
+.btn.danger:hover:not(:disabled) {
+  color: #fff; background: var(--err); box-shadow: none;
+}
+.btn.danger:disabled { color: var(--text-3); }
