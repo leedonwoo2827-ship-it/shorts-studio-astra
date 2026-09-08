@@ -842,11 +842,17 @@ PAGES.storyboard = async (m) => {
     return btn;
   };
   const u = `/api/projects/${enc}`;
+  /* ★ **순서대로 놓는다.** 예전에는 검증이 맨 앞이었는데, 그대로 누르면 검증한 뒤
+   *   자막을 갈아엎게 되고 방금 한 검증이 버려진다(자막이 바뀐 씬은 판정을 지운다).
+   *   고치는 것을 먼저 하고 **검증이 마지막**이다. */
   rc.appendChild(row(
-    busy(el("button", "btn primary", "전체 사실검증"), "검증 중…", () => post(`${u}/verify`)),
-    busy(el("button", "btn", "AI 후크 다시"), "후크 다시…", () => post(`${u}/hooks/regen`)),
-    busy(el("button", "btn", "AI 자막 다시"), "자막 다시…", () => post(`${u}/captions/regen`)),
+    busy(el("button", "btn", "① AI 후크 다시"), "후크 다시…", () => post(`${u}/hooks/regen`)),
+    busy(el("button", "btn money", "② AI 자막 다시"), "자막 다시…", () => post(`${u}/captions/regen`)),
+    busy(el("button", "btn primary", "③ 전체 사실검증"), "검증 중…", () => post(`${u}/verify`)),
   ));
+  rc.appendChild(el("div", "hint",
+    "② 은 톤이 안 맞을 때만 — 씬 전체를 다시 써서 크레딧이 듭니다. "
+    + "고치는 것을 먼저 하고 ③ 로 닫으세요. 그다음 의심 가는 씬만 씬 줄의 ① 검토로."));
   const ng = Object.entries(d.verify || {}).filter(([, v]) => !v.ok);
   const seen = Object.keys(d.verify || {}).length;
   rc.appendChild(el("div", "hint", seen
