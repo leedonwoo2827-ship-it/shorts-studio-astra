@@ -1,0 +1,232 @@
+{#-
+  세로 쇼츠 9:16 컴포지션 — HyperFrames.
+
+  ★ 이 템플릿은 **시간을 계산하지 않는다.** s7_compose.py 가 다 계산해서 넘긴다
+    (sc.start · sc.dur · sc.audio_sec · cues · rail). 계산이 두 곳에 있으면
+    언젠가 서로 달라지고, 그때 화면과 소리가 갈린다.
+
+  ★ data-start 는 **숫자**다. id 참조(`data-start="sc01"`)를 쓰면 HyperFrames 의
+    static-frame dedup 이 꺼져 렌더가 2배 넘게 느려진다.
+
+  ★ 자막 큐는 **루트 직속**이다. 씬 clip 안에 두면 씬이 사라질 때 같이 사라져
+    마지막 큐가 잘린다.
+-#}
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width={{ width }}, height={{ height }}" />
+    <title>{{ title }}</title>
+
+    {#- GSAP 은 자체 호스팅한다. 렌더 중 네트워크 fetch 는 결정론을 깬다. -#}
+    <script src="./vendor/gsap.min.js"></script>
+
+    <style>
+      @font-face {
+        font-family: "Pretendard";
+        src: url("./assets/fonts/Pretendard-Regular.woff2") format("woff2");
+        font-weight: 400; font-display: block;
+      }
+      @font-face {
+        font-family: "Pretendard";
+        src: url("./assets/fonts/Pretendard-Bold.woff2") format("woff2");
+        font-weight: 700; font-display: block;
+      }
+      @font-face {
+        font-family: "BlackHanSans";
+        src: url("./assets/fonts/BlackHanSans-Regular.woff2") format("woff2");
+        font-weight: 400; font-display: block;
+      }
+      {#- OS 폴백은 선언만 한다. 선언이 없으면 lint font_family_without_font_face 로 막힌다. -#}
+      @font-face { font-family: "Malgun Gothic"; src: local("Malgun Gothic"); }
+
+      :root {
+        --W: {{ width }}px;
+        --H: {{ height }}px;
+        --artH: {{ art_h }}px;
+        --bandTop: {{ band_top }}px;
+        --bandBot: {{ band_bottom }}px;
+        --ivory: {{ ivory }};
+        --ink: {{ ink }};
+        --accent: {{ accent }};
+        --text: {{ text }};
+        --sub-ink: {{ sub_ink }};
+      }
+
+{{ theme_css }}
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-width="{{ width }}"
+      data-height="{{ height }}"
+      data-duration="{{ total }}"
+      data-fps="{{ fps }}"
+    >
+{% for sc in scenes %}
+      {#- 씬 {{ sc.no }} · {{ sc.role }} · {{ sc.start }}s +{{ sc.dur }}s -#}
+      <section id="sc{{ '%03d' % sc.no }}" class="clip scene"
+               data-start="{{ sc.start }}" data-duration="{{ sc.dur }}">
+        {#- 그림칸. 세 갈래다.
+              움직이는 장면  인라인 SVG. `<img src=".svg">` 로 넣으면 브라우저가
+                             그림으로만 취급해 **SMIL 이 돌지 않는다**(실측).
+              정지 그림      배경으로 깔고 켄번스로 민다.
+              없음           옅은 결을 깔아 둔다 — 빈 화면보다 낫다. -#}
+        {%- if sc.animated %}
+        <div id="art{{ '%03d' % sc.no }}" class="art live">{{ sc.svg }}</div>
+        {%- elif sc.art %}
+        <div id="art{{ '%03d' % sc.no }}" class="art"
+             style="background-image:url('./assets/{{ sc.art }}')"></div>
+        {%- else %}
+        <div id="art{{ '%03d' % sc.no }}" class="art empty"></div>
+        {%- endif %}
+        <div class="veil veil-top"></div>
+        <div class="veil veil-bot"></div>
+
+        {#- 강조 도형은 **정지 그림에만** 얹는다.
+              움직이는 장면 위에 또 고리를 그으면 두 움직임이 싸워서 둘 다 안 읽힌다
+              (실측: 아스트라 씬 위에 주황 고리가 겹쳐 장면을 가렸다). -#}
+        {%- if not sc.animated %}
+        <svg class="accent" viewBox="0 0 {{ width }} {{ height }}"
+             xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          {#- 강조는 코드가 정한다(s7_compose._accent). 씬 성격에 따라 고리·화살표·점. -#}
+          {%- if sc.accent.kind == 'ring' %}
+          <ellipse id="ac{{ '%03d' % sc.no }}" class="ring"
+                   cx="{{ sc.accent.cx }}" cy="{{ sc.accent.cy }}"
+                   rx="{{ sc.accent.rx }}" ry="{{ sc.accent.ry }}"
+                   transform="rotate({{ sc.accent.rot }} {{ sc.accent.cx }} {{ sc.accent.cy }})" />
+          {%- elif sc.accent.kind == 'arrow' %}
+          <path id="ac{{ '%03d' % sc.no }}" class="arrow" d="{{ sc.accent.d }}" />
+          {%- else %}
+          <circle id="ac{{ '%03d' % sc.no }}" class="dot"
+                  cx="{{ sc.accent.cx }}" cy="{{ sc.accent.cy }}" r="{{ sc.accent.r }}" />
+          {%- endif %}
+        </svg>
+        {%- endif %}
+
+        <div class="hook">
+          <div class="h1 line">{{ sc.hook_line1 }}</div>
+          <div class="h2 line">{{ sc.hook_line2 }}</div>
+          <div class="rule" id="ru{{ '%03d' % sc.no }}"></div>
+        </div>
+      </section>
+{% endfor %}
+
+      {#- 진행 레일 — 30초 내내. 칸 하나가 씬 하나다. -#}
+      <div id="rail" class="clip rail" data-start="0" data-duration="{{ total }}">
+{%- for sc in scenes %}
+        <span class="seg"><i id="rg{{ '%03d' % sc.no }}"></i></span>
+{%- endfor %}
+      </div>
+
+      {#- 자막 큐 — 루트 직속. -#}
+{% for cue in cues %}
+      <div id="cc{{ '%03d' % loop.index }}" class="clip cc"
+           data-start="{{ cue.start }}" data-duration="{{ cue.dur }}">{{ cue.text }}</div>
+{%- endfor %}
+
+{% if hashtags %}
+      <div id="tags" class="clip tags" data-start="0" data-duration="{{ total }}">{{ hashtags }}</div>
+{% endif %}
+
+      {#- 내레이션. id 가 없으면 lint media_missing_id 이고 **소리가 조용히 빠진다**.
+          data-duration 은 씬 길이가 아니라 **오디오 자체 길이**다. -#}
+{% for sc in scenes %}{% if sc.audio_sec > 0 %}
+      <audio id="vo{{ '%03d' % sc.no }}" src="./audio/{{ '%03d' % sc.no }}.wav"
+             data-audio-group="voiceover"
+             data-start="{{ sc.start }}" data-duration="{{ sc.audio_sec }}"
+             data-volume="1"></audio>
+{%- endif %}{% endfor %}
+    </div>
+
+    <script>
+      // ★ 레지스트리를 **없으면 만든다.** 렌더할 때는 producer 가 먼저 만들어
+      //   주지만, 콘솔의 미리보기 플레이어에서는 없다 — 그때
+      //   `Cannot set properties of undefined (setting 'main')` 로 죽고
+      //   미리보기가 첫 프레임에 멈춘 채로 보인다(실측). 렌더 쪽에는 영향이 없다.
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      /** 선을 왼쪽부터 그어 나간다. dash 길이를 실제 경로 길이로 잡는다 —
+       *  퍼센트로 주면 브라우저마다 다르게 끊긴다. 도형이 없으면 조용히 넘긴다. */
+      function draw(sel, at, dur) {
+        const el = document.querySelector(sel);
+        if (!el || typeof el.getTotalLength !== "function") return;
+        const len = el.getTotalLength();
+        if (!(len > 0)) return;
+        el.style.strokeDasharray = len + " " + len;
+        tl.fromTo(el,
+          { strokeDashoffset: len, autoAlpha: 0 },
+          { strokeDashoffset: 0, autoAlpha: 1, duration: dur, ease: "power2.inOut" },
+          at);
+      }
+
+{% for sc in scenes %}
+      // ── 씬 {{ sc.no }} ────────────────────────────────────────────────
+      {%- if sc.animated %}
+      // ★ 움직이는 장면에는 **켄번스를 걸지 않는다.** 장면이 이미 움직이는데
+      //   판까지 밀면 두 움직임이 싸워서 어지럽다. 아주 옅은 숨만 준다.
+      // 배율 숨조차 주지 않는다. 장면이 스스로 움직이는데 판까지 밀면
+      // 두 움직임이 싸워서 어지럽다. 대신 씬이 뜰 때 짧게 페이드만 준다 —
+      // 하드 컷보다 눈에 부드럽다.
+      tl.from("#art{{ '%03d' % sc.no }}",
+        { autoAlpha: 0, duration: 0.34, ease: "power1.out" }, {{ sc.start }});
+      {%- else %}
+      // 켄번스. 배율을 1보다 크게 유지해 빈 가장자리를 물지 않는다.
+      tl.fromTo("#art{{ '%03d' % sc.no }}",
+        { scale: {{ sc.kb.from }}, x: {{ sc.kb.x0 }}, y: {{ sc.kb.y0 }} },
+        { scale: {{ sc.kb.to }}, x: {{ sc.kb.x1 }}, y: {{ sc.kb.y1 }},
+          duration: {{ sc.dur }}, ease: "none" },
+        {{ sc.start }});
+      {%- endif %}
+
+      // 후크 두 줄이 차례로. autoAlpha 만 쓴다(display/visibility 트윈 금지).
+      // 후크 두 줄이 차례로. 폭을 줄이고 시간을 늘렸다 — 씬이 바뀌는 순간에
+      // 후크·밑줄·자막이 동시에 들이치면 그 자체가 촐싹거림이 된다.
+      tl.from("#sc{{ '%03d' % sc.no }} .hook .line",
+        { y: 24, autoAlpha: 0, duration: 0.55, stagger: 0.18, ease: "power2.out" },
+        {{ sc.start }});
+
+      // 강조 밑줄이 왼→오로 그려진다
+      tl.fromTo("#ru{{ '%03d' % sc.no }}",
+        { scaleX: 0 }, { scaleX: 1, duration: 0.62, ease: "power2.out" },
+        {{ sc.start + 0.78 }});
+
+      // 강조 도형 — 한 번에 나타나지 않고 그려진다.
+      // ★ drawSVG 를 쓰지 않는다 — GSAP Club(유료) 플러그인이라 무료 gsap.min.js
+      //   에는 없고, 없으면 **조용히 아무 일도 안 일어난다.** 대신 dash 로 긋는다.
+      {%- if not sc.animated %}
+      {%- if sc.accent.kind == 'dot' %}
+      tl.fromTo("#ac{{ '%03d' % sc.no }}",
+        { scale: 0, transformOrigin: "center center" },
+        { scale: 1, duration: 0.5, ease: "back.out(2)" },
+        {{ sc.accent.at }});
+      {%- else %}
+      draw("#ac{{ '%03d' % sc.no }}", {{ sc.accent.at }}, 0.66);
+      {%- endif %}
+      {%- endif %}
+
+      // 레일 칸 — 지난 씬은 꽉, 지금 씬은 실시간으로 찬다
+      {%- if sc.no > 1 %}
+      tl.set("#rg{{ '%03d' % sc.no }}", { scaleX: 0 }, 0);
+      {%- endif %}
+      tl.fromTo("#rg{{ '%03d' % sc.no }}",
+        { scaleX: 0 }, { scaleX: 1, duration: {{ sc.dur }}, ease: "none" },
+        {{ sc.start }});
+{% endfor %}
+
+      // 자막 큐 — 아래에서 살짝 올라온다
+{% for cue in cues %}
+      // ★ 자막은 **움직이지 않는다.** 예전에 26px 올라오게 했더니 2초마다
+      //   글자가 튀어올라 화면이 안절부절못했다. 페이드만 준다.
+      tl.from("#cc{{ '%03d' % loop.index }}",
+        { autoAlpha: 0, duration: 0.30, ease: "power1.out" }, {{ cue.start }});
+{%- endfor %}
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

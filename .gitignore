@@ -1,0 +1,22 @@
+# 산출물 — 레포 안에 쌓이지만 커밋하지 않는다.
+# 프로젝트 하나가 mp4 · wav · png 로 수십 MB 다.
+/projects/
+
+# 환경
+/.venv-app/
+/.venv/
+/node_modules/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# 이 PC 것 (setup 이 만든다)
+/config.local.json
+
+# 임시
+/_spike/
+*.log
+
+# 원고·참고 자료 — 단행본 본문과 롱폼 산출물이라 공개 레포에 넣지 않는다.
+# 화풍 기준 그림은 assets/style_ref/ 에 따로 4장만 추려 두었다.
+/_plan/

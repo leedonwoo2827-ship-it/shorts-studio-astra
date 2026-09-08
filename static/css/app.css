@@ -1,0 +1,482 @@
+/* 쇼츠공방 II — 디자인 시스템
+ *
+ * 구조·규칙·토큰 이름은 avatar-lecture(260902-mp4Perso)에서 가져왔고, 그쪽은
+ * 260812-summary-showcase 에서 가져왔다. **바꾼 것은 브랜드 색 하나뿐이다.**
+ *
+ * ★ 왜 네이비인가.
+ *   창을 여러 개 나란히 띄우는 것이 전제다 — 쇼케이스는 테라코타(20도),
+ *   이론 강의는 딥 틸(175도), 아바타 강의는 노랑(40도)이다. 색이 겹치면 창을
+ *   잘못 눌러 남의 앱에 원고를 넣는다. 여기는 **네이비(209도)** 라 그 셋과 멀다.
+ *   그리고 이 색은 만들어지는 쇼츠의 잉크색(#1F4E79)과 **같은 색**이다 —
+ *   화면과 산출물이 같은 얼굴을 갖는다.
+ *
+ * 규칙 셋은 그대로 지킨다.
+ *   1) 테두리를 쓰지 않는다 — 구분은 inset box-shadow(헤어라인)로.
+ *   2) 그림자는 떠 있는 층만. 바탕 카드는 그림자 0.
+ *   3) 반투명은 항상 rgb(var(--x-rgb) / .xx).
+ */
+
+/* ══ 1. 토큰 ══════════════════════════════════════════════════════════ */
+:root {
+  --brand-rgb: 31 78 121;
+  --ok-rgb: 37 124 54;
+  --err-rgb: 176 31 65;
+  --idle-rgb: 137 137 137;
+  --scrim-rgb: 26 29 33;
+
+  /* 종이 스택 — 순백이 아니라 따뜻한 오프화이트. 산출물의 아이보리와 같은 식구다. */
+  --paper: #f6f4ef;
+  --paper-deep: #ece8e0;
+  --bone: #fffdf9;
+  --white: #ffffff;
+  --hairline: rgb(28 34 42 / .10);
+  --hairline-2: rgb(28 34 42 / .055);
+
+  /* 잉크 */
+  --ink: #1b1f24;
+  --text: #2b3138;
+  --text-2: #676f78;
+  --text-3: #929aa3;
+
+  /* 브랜드 램프 — 500 에서 갈린다. ≥500 은 작은 글씨로 읽히고, ≤400 은 채움 전용. */
+  --brand-wash: #eaf0f7;
+  --brand-soft: #b9cee4;
+  --brand-400: #3d78b0;   /* 채움 전용 — 텍스트 금지 */
+  --brand-500: #2b6193;
+  --brand: #1f4e79;       /* 산출물의 잉크색과 같다 */
+  --brand-hover: #163a5b;
+
+  /* 강조(주황) — 산출물의 후크 두 번째 줄과 같은 색.
+     화면에서는 **아껴 쓴다**: 「지금 봐야 하는 것」에만. */
+  --accent: #e07a2f;
+  --accent-wash: #fdf1e6;
+  --accent-ink: #2b2a26;
+
+  --ink-fill: #17181c;        /* 주 단추. 화면에 하나만 둔다 */
+  --ink-fill-hover: #000000;
+
+  --ok: #257c36;   --ok-wash: #e9efe7;
+  --warn: #8a5a12; --warn-wash: #f8f1e5;
+  --err: #b01f41;  --err-wash: #f4e7e9;
+  --idle: #898989; --idle-wash: #efeeeb;
+
+  /* 레일만 다크 — 다크 모드가 아니라 **레이아웃 대비**다. 어두운 세로띠가
+     작업면의 경계를 잡아 주고, 흰 바탕이 넓게 깔릴 때의 눈부심을 줄인다.
+     레일 위에서는 대비 기준면이 --paper 가 아니라 --rail 이다. */
+  --rail: #1c2027;
+  --rail-ink: #e9ecf0;
+  --rail-ink-2: #a8b0ba;
+  --rail-ink-3: #7d858f;
+  --rail-brand: #7fb3e3;
+  --rail-hover: #262b33;
+  --rail-hairline: rgb(255 255 255 / .09);
+
+  --font: "Pretendard", -apple-system, BlinkMacSystemFont, "Segoe UI",
+          "Malgun Gothic", system-ui, sans-serif;
+  --mono: "Cascadia Mono", Consolas, "D2Coding", monospace;
+  --t-2xs: 11px; --t-xs: 12px; --t-sm: 12.5px; --t-base: 13.5px;
+  --t-md: 15px;  --t-lg: 17px; --t-xl: 19px;   --t-2xl: 24px;
+  --lh-tight: 1.35; --lh: 1.6;
+
+  --r-sm: 6px; --r: 10px; --r-lg: 14px; --r-pill: 999px;
+  --col-rail: 264px; --col-rail-min: 62px;
+  --dock-h: 240px;
+  --lift: 0 24px 64px rgb(18 26 40 / .18), 0 2px 8px rgb(18 26 40 / .08);
+  --shadow: 0 1px 2px rgb(28 34 42 / .06), 0 8px 24px rgb(28 34 42 / .07);
+  --ease: cubic-bezier(.4, 0, .2, 1);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: var(--paper);
+  color: var(--text);
+  font: 400 var(--t-base)/var(--lh) var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+[hidden] { display: none !important; }
+
+/* ══ 2. 껍데기 — 레일 + 작업면 + 바닥 도크 ═════════════════════════════ */
+.app {
+  display: grid;
+  grid-template-columns: var(--col-rail) minmax(0, 1fr);
+  height: 100vh; overflow: hidden;
+  transition: grid-template-columns .16s var(--ease);
+}
+body.rail-off .app { grid-template-columns: var(--col-rail-min) minmax(0, 1fr); }
+body.dock-on .main { padding-bottom: calc(var(--dock-h) + 24px); }
+body.dock-on.dock-min .main { padding-bottom: 72px; }
+
+.main {
+  overflow-y: auto; min-width: 0;
+  padding: 26px 34px 34px;
+}
+
+/* ── 레일 ─────────────────────────────────────────────────────────────── */
+.rail {
+  background: var(--rail); color: var(--rail-ink);
+  display: flex; flex-direction: column;
+  overflow: hidden; min-width: 0;
+}
+.rail-brandbar {
+  display: flex; align-items: center; gap: 9px;
+  padding: 16px 14px 12px;
+  box-shadow: inset 0 -1px 0 var(--rail-hairline);
+}
+.brand-mark {
+  flex: 0 0 26px; height: 26px; border-radius: 7px;
+  background: var(--brand-400); color: #fff;
+  display: grid; place-items: center;
+  font-size: var(--t-2xs); font-weight: 800; letter-spacing: -.02em;
+}
+.brand-name {
+  flex: 1; min-width: 0;
+  font-size: var(--t-sm); font-weight: 700; color: var(--rail-ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.rail-toggle {
+  flex: none; width: 26px; height: 26px; border: 0; border-radius: var(--r-sm);
+  background: none; color: var(--rail-ink-3); cursor: pointer; font-size: 14px;
+}
+.rail-toggle:hover { background: var(--rail-hover); color: var(--rail-ink); }
+body.rail-off .brand-name, body.rail-off .rail-scroll .step-name,
+body.rail-off .rail-scroll .cost, body.rail-off .rail-sect,
+body.rail-off .conn-text, body.rail-off .rail-all span { display: none; }
+
+.rail-scroll { flex: 1; overflow-y: auto; padding: 12px 10px 14px; }
+
+.rail-all {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  width: 100%; margin-bottom: 12px;
+  padding: 10px 12px; border: 0; border-radius: var(--r);
+  background: var(--brand); color: #fff;
+  font: 700 var(--t-sm)/1 var(--font); cursor: pointer;
+}
+.rail-all:hover { background: var(--brand-500); }
+.rail-all:disabled { opacity: .45; cursor: default; }
+
+/* ── 묶음 단추 ─────────────────────────────────────────────────────────
+   [ 대본 만들기 ]  진한 네이비 — 화면에 **하나만** 둔다. 여기서 시작한다.
+   [ 영상 만들기 ]  하얀 단추
+   [ 전체 빌드   ]  하얀 단추
+   묶음은 편의고 낱개가 원칙이다. 그래서 묶음 단추 아래에 단계 줄이 그대로
+   남아 있고, 한 개씩 누를 수 있다. */
+.grp {
+  display: flex; align-items: center; gap: 7px;
+  width: 100%; margin: 0 0 8px;
+  padding: 11px 12px; border: 0; border-radius: var(--r);
+  background: var(--bone); color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  font: 800 var(--t-base)/1 var(--font); cursor: pointer;
+  transition: background .12s, box-shadow .12s;
+}
+.grp:hover { background: var(--white); box-shadow: inset 0 0 0 1px var(--brand-soft); }
+.grp.primary {
+  background: var(--brand); color: #fff; box-shadow: none;
+}
+.grp.primary:hover { background: var(--brand-500); }
+.grp:disabled { opacity: .42; cursor: default; }
+.grp-label { flex: 1; text-align: left; }
+.grp .cost {
+  font-size: 9px; font-weight: 800;
+  border-radius: 4px; padding: 0 4px; line-height: 15px;
+  color: var(--err); background: rgb(var(--err-rgb) / .10);
+}
+.grp.primary .cost { color: #ffd9e2; background: rgb(255 255 255 / .18); }
+body.rail-off .grp-label, body.rail-off .grp .cost { display: none; }
+
+/* 묶음 사이의 금 */
+.rail-sep {
+  height: 1px; margin: 14px 4px 12px;
+  background: var(--rail-hairline);
+}
+
+/* ── 단계 한 줄 — 번호 · 이름 · $ · 상태점 ────────────────────────────── */
+.step {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; text-align: left;
+  padding: 9px 10px; margin-bottom: 2px;
+  background: none; border: 0; border-radius: 8px;
+  color: var(--rail-ink-2); cursor: pointer;
+  font: 400 var(--t-base)/1 var(--font);
+  transition: background .12s, color .12s;
+}
+.step:hover { background: var(--rail-hover); color: var(--rail-ink); }
+.step.on { background: var(--rail-hover); color: var(--rail-ink); box-shadow: inset 2px 0 0 var(--rail-brand); }
+.step.on .step-no { background: var(--brand-400); color: #fff; }
+.step:disabled { opacity: .4; cursor: default; }
+
+.step-no {
+  flex: 0 0 22px; height: 22px;
+  display: grid; place-items: center;
+  border-radius: var(--r-sm);
+  background: rgb(255 255 255 / .10); color: var(--rail-ink-3);
+  font-size: var(--t-2xs); font-weight: 800; font-variant-numeric: tabular-nums;
+}
+.step-name { flex: 1; font-size: var(--t-base); font-weight: 600; }
+.step .cost {
+  font-size: 9px; font-weight: 800; color: #f4a0b4;
+  border-radius: 4px; padding: 0 4px; line-height: 15px;
+  background: rgb(var(--err-rgb) / .22);
+}
+.step-dot { flex: 0 0 7px; height: 7px; border-radius: 50%; background: rgb(255 255 255 / .18); }
+.step-dot.done { background: var(--ok); }
+.step-dot.part { background: var(--accent); }
+.step-dot.busy { background: var(--rail-brand); animation: pulse 1s infinite; }
+.step.stale .step-dot { box-shadow: 0 0 0 3px rgb(var(--err-rgb) / .35); }
+
+@keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .25 } }
+
+/* 「넘기는 것」 — 만드는 일과 넘기는 일 사이의 금 */
+.step-rule {
+  display: flex; align-items: center; gap: 8px;
+  margin: 12px 4px 8px;
+  font-size: 10px; font-weight: 700; letter-spacing: .08em;
+  color: var(--rail-ink-3);
+}
+.step-rule::before, .step-rule::after {
+  content: ""; flex: 1; height: 1px; background: var(--rail-hairline);
+}
+
+/* 연결 상태 — 레일 맨 아래에 붙는다 */
+.conn {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 10px 16px; border: 0;
+  background: none; color: var(--rail-ink-2); cursor: pointer;
+  font: 400 var(--t-xs)/1.3 var(--font); text-align: left;
+  box-shadow: inset 0 1px 0 var(--rail-hairline);
+}
+.conn:hover { background: var(--rail-hover); }
+.conn .led { flex: 0 0 8px; height: 8px; border-radius: 50%; background: var(--idle); }
+.conn.ok .led { background: var(--ok); }
+.conn.bad .led { background: var(--err); }
+.conn-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ══ 3. 바닥 도크 — 기록 ═══════════════════════════════════════════════
+   화면을 옮겨도 살아 있어야 해서 .app 밖에 있다. 그래서 위치를 직접 잡는다.
+   왼쪽 끝을 레일 폭에 맞춰 비켜 준다 — 목록을 덮으면 안 된다. */
+.dock {
+  position: fixed; z-index: 40;
+  left: var(--col-rail); right: 0; bottom: 0;
+  height: var(--dock-h);
+  display: flex; flex-direction: column;
+  background: var(--ink-fill);
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  box-shadow: 0 -10px 30px rgb(var(--scrim-rgb) / .22);
+  transition: left .16s var(--ease), height .16s var(--ease);
+}
+body.rail-off .dock { left: var(--col-rail-min); }
+body.dock-min .dock { height: 42px; }
+
+.dock-head {
+  display: flex; align-items: center; gap: 9px; flex: none;
+  width: 100%; border: 0; background: none; color: #d8d6d1;
+  font: 700 var(--t-xs)/1 var(--font); padding: 12px 16px 10px;
+  text-align: left; cursor: pointer;
+}
+.dock-head .led { flex: 0 0 8px; height: 8px; border-radius: 50%; background: var(--brand-400); }
+.dock.done .dock-head .led { background: var(--ok); animation: none; }
+.dock.err  .dock-head .led { background: var(--err); animation: none; }
+.dock:not(.done):not(.err) .dock-head .led { animation: pulse 1s infinite; }
+.dock-now { flex: 1; font-weight: 500; color: #9a9792; overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap; }
+.dock-time { font-variant-numeric: tabular-nums; color: #7f7c78; }
+.dock-stop {
+  border: 0; border-radius: var(--r-sm); padding: 4px 10px;
+  background: rgb(255 255 255 / .12); color: #eceae6;
+  font: 700 var(--t-2xs)/1.6 var(--font); cursor: pointer;
+}
+.dock-stop:hover { background: rgb(var(--err-rgb) / .55); }
+.dock-bar { height: 3px; background: rgb(255 255 255 / .10); flex: none; }
+.dock-bar > i { display: block; height: 100%; width: 0; background: var(--brand-400);
+                transition: width .3s var(--ease); }
+.dock.done .dock-bar > i { background: var(--ok); }
+.dock.err  .dock-bar > i { background: var(--err); }
+
+.dock .log {
+  flex: 1; min-height: 0; margin: 0; overflow-y: auto;
+  padding: 8px 16px 14px;
+  font: 400 var(--t-xs)/1.65 var(--mono);
+  color: #c9c6c1; white-space: pre-wrap; word-break: break-all;
+}
+.dock .log .bad { color: #ff9aa2; }
+.dock .log .warn { color: #f3c579; }
+.dock .log .head { color: #8fc0f0; font-weight: 700; }
+body.dock-min .dock .log, body.dock-min .dock-bar { display: none; }
+
+/* ══ 4. 작업면 부품 ════════════════════════════════════════════════════ */
+.page-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+h1 { font-size: var(--t-2xl); font-weight: 800; color: var(--ink); letter-spacing: -.02em; }
+.page-sub { color: var(--text-2); font-size: var(--t-sm); margin-bottom: 22px; }
+
+/* ── 탭 ────────────────────────────────────────────────────────────────
+   한 화면이 단계 여럿을 담는다. 탭 하나가 단계 하나이고, 탭마다 그 단계의
+   실행 단추와 상태점이 붙는다 — 화면 수를 줄이면서 클릭 권한은 지킨다. */
+.tabbar {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  margin-bottom: 16px;
+  box-shadow: inset 0 -1px 0 var(--hairline);
+  padding-bottom: 0;
+}
+.tab {
+  display: flex; align-items: center; gap: 7px;
+  border: 0; background: none; cursor: pointer;
+  padding: 9px 14px 10px;
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
+  font: 700 var(--t-base)/1 var(--font);
+  color: var(--text-2);
+  box-shadow: inset 0 -2px 0 transparent;
+}
+.tab:hover { color: var(--ink); background: var(--bone); }
+.tab.on {
+  color: var(--ink); background: var(--bone);
+  box-shadow: inset 0 -2px 0 var(--brand);
+}
+.tab .cost {
+  font-size: 9px; font-weight: 800; color: var(--err);
+  background: rgb(var(--err-rgb) / .10);
+  border-radius: 4px; padding: 0 4px; line-height: 15px;
+}
+.tab .step-dot { background: rgb(28 34 42 / .16); }
+.tab .step-dot.done { background: var(--ok); }
+.tab .step-dot.part { background: var(--accent); }
+.tab.stale .step-dot { box-shadow: 0 0 0 3px rgb(var(--err-rgb) / .30); }
+
+/* 레일 줄에 붙는 탭 개수 — 안에 더 있다는 표시 */
+.step .tabn {
+  font-size: 9px; font-weight: 800; line-height: 15px;
+  padding: 0 5px; border-radius: var(--r-pill);
+  color: var(--rail-ink-2); background: rgb(255 255 255 / .10);
+}
+
+/* 장면 미리보기 칸 */
+.artcell { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.artlabel { font-size: var(--t-2xs); font-weight: 700; color: var(--text-3); }
+
+.card {
+  background: var(--bone); border-radius: var(--r-lg);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  padding: 20px 22px; margin-bottom: 16px;
+}
+.card > h2 {
+  font-size: var(--t-md); font-weight: 700; color: var(--ink);
+  margin-bottom: 4px; letter-spacing: -.01em;
+}
+.card > .hint { color: var(--text-2); font-size: var(--t-sm); margin-bottom: 14px; }
+
+.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.row + .row { margin-top: 10px; }
+.grow { flex: 1; min-width: 0; }
+
+.btn {
+  border: 0; border-radius: var(--r); cursor: pointer;
+  padding: 9px 16px; font: 700 var(--t-sm)/1.4 var(--font);
+  background: var(--paper-deep); color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.btn:hover { background: var(--brand-wash); color: var(--brand-hover); }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn.primary { background: var(--ink-fill); color: #fff; box-shadow: none; }
+.btn.primary:hover { background: var(--ink-fill-hover); }
+.btn.money { box-shadow: inset 0 0 0 1px rgb(var(--err-rgb) / .35); }
+.btn.sm { padding: 5px 11px; font-size: var(--t-xs); }
+.btn.danger:hover { background: var(--err-wash); color: var(--err); }
+
+input[type=text], input[type=number], select, textarea {
+  border: 0; border-radius: var(--r-sm);
+  background: var(--white); color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  padding: 8px 11px; font: 400 var(--t-base)/1.5 var(--font);
+}
+textarea { width: 100%; resize: vertical; }
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--brand-400); outline-offset: 1px;
+}
+label.field { display: flex; flex-direction: column; gap: 5px; font-size: var(--t-xs);
+              color: var(--text-2); font-weight: 700; }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  border-radius: var(--r-pill); padding: 3px 10px;
+  font-size: var(--t-2xs); font-weight: 800;
+  background: var(--idle-wash); color: var(--text-2);
+}
+.pill.ok { background: var(--ok-wash); color: var(--ok); }
+.pill.warn { background: var(--warn-wash); color: var(--warn); }
+.pill.bad { background: var(--err-wash); color: var(--err); }
+
+.note {
+  border-radius: var(--r); padding: 11px 14px; font-size: var(--t-sm);
+  background: var(--warn-wash); color: var(--warn);
+  box-shadow: inset 0 0 0 1px rgb(138 90 18 / .18);
+  margin-bottom: 14px;
+}
+.note.bad { background: var(--err-wash); color: var(--err);
+            box-shadow: inset 0 0 0 1px rgb(var(--err-rgb) / .20); }
+
+/* 프로젝트 목록 */
+.plist { display: grid; gap: 10px; }
+.pcard {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--bone); border-radius: var(--r);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  padding: 13px 16px; cursor: pointer; text-align: left; border: 0;
+  font: inherit; color: inherit; width: 100%;
+}
+.pcard:hover { box-shadow: inset 0 0 0 1px var(--brand-soft); background: var(--white); }
+.pcard.on { box-shadow: inset 0 0 0 2px var(--brand-400); }
+.pcard .t { flex: 1; min-width: 0; }
+.pcard .t b { display: block; color: var(--ink); font-size: var(--t-base);
+              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pcard .t span { color: var(--text-3); font-size: var(--t-xs); }
+
+/* 씬 편집 표 */
+.scene {
+  background: var(--bone); border-radius: var(--r);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  padding: 14px 16px; margin-bottom: 10px;
+}
+.scene-head { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
+.scene-head .no {
+  width: 22px; height: 22px; border-radius: var(--r-sm);
+  background: var(--brand); color: #fff;
+  display: grid; place-items: center;
+  font-size: var(--t-2xs); font-weight: 800;
+}
+.scene-head .role { font-size: var(--t-2xs); font-weight: 800; color: var(--text-3);
+                    letter-spacing: .06em; text-transform: uppercase; }
+.scene-grid { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 8px 12px;
+              align-items: start; }
+.scene-grid > label { font-size: var(--t-xs); font-weight: 700; color: var(--text-2);
+                      padding-top: 9px; }
+.scene-src { grid-column: 2; font-size: var(--t-xs); color: var(--text-3);
+             line-height: var(--lh); }
+.hookpair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+.thumb {
+  width: 88px; height: 132px; border-radius: var(--r-sm); flex: none;
+  background: var(--paper-deep) center/cover no-repeat;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.vwrap { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
+/* 미리보기 — 굽기 전에 컴포지션을 그대로 재생하는 자리.
+   9:16 이라 폭을 좁게 잡고 비율로 높이를 맞춘다. */
+.player {
+  width: 300px; aspect-ratio: 9 / 16; flex: none;
+  border-radius: var(--r); overflow: hidden;
+  background: var(--paper-deep);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.player > hyperframes-player, .player > iframe {
+  display: block; width: 100%; height: 100%; border: 0;
+}
+
+video { width: 340px; max-width: 100%; border-radius: var(--r);
+         background: #000; display: block; }
+pre.out {
+  background: var(--white); border-radius: var(--r); padding: 14px 16px;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  font: 400 var(--t-xs)/1.7 var(--mono); white-space: pre-wrap; word-break: break-word;
+  max-height: 420px; overflow-y: auto; flex: 1; min-width: 280px;
+}

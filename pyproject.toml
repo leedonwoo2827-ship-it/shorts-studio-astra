@@ -1,0 +1,12 @@
+[project]
+name = "shorts-astra"
+version = "0.1.0"
+description = "단행본 한 장(章) → 9:16 30초 모션 쇼츠. HyperFrames + 구독 OAuth."
+requires-python = ">=3.10"
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools]
+packages = ["core", "pipeline", "llm", "imagegen"]

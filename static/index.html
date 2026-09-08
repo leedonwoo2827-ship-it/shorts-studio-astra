@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>쇼츠공방 II</title>
+  <link rel="stylesheet" href="/static/css/app.css" />
+</head>
+<body>
+  <!-- 두 층 —
+       · 지면 층(.main): 저장 안 된 글이 있는 것. 화면을 옮기면 사라지면 안 된다.
+       · 떠 있는 층(.dock): 진행 기록. 화면을 옮겨도 살아 있다.
+       이 구분이 이 화면의 유일한 구조 규칙이다. -->
+  <div class="app">
+    <nav class="rail" aria-label="순서">
+      <div class="rail-brandbar">
+        <span class="brand-mark">9:16</span>
+        <span class="brand-name">쇼츠공방 II</span>
+        <button class="rail-toggle" id="rail-toggle" type="button"
+                title="레일 접기 (Ctrl+B)">‹</button>
+      </div>
+
+      <div class="rail-scroll">
+        <!-- 묶음 단추와 단계 줄 전부 main.js 가 /api/stages 를 받아 그린다.
+             표를 화면에 손으로 적지 않는다 — 표는 pipeline/stages.py 에만 있다.
+             적어 두면 단계를 하나 늘릴 때 한쪽만 고쳐서 화면이 거짓말을 한다. -->
+        <div id="steps"></div>
+      </div>
+
+      <button class="conn" id="conn-llm" type="button" title="대본·지시문을 쓰는 로그인">
+        <span class="led"></span><span class="conn-text">Claude 확인 중…</span>
+      </button>
+      <button class="conn" id="conn-img" type="button" title="그림을 받는 로그인">
+        <span class="led"></span><span class="conn-text">ChatGPT 확인 중…</span>
+      </button>
+    </nav>
+
+    <main class="main" id="main"></main>
+  </div>
+
+  <section class="dock" id="dock" hidden aria-label="기록">
+    <button class="dock-head" id="dock-toggle" type="button">
+      <span class="led"></span>
+      <span class="dock-title">기록</span>
+      <span class="dock-now" id="dock-now"></span>
+      <span class="dock-time" id="dock-time">00:00</span>
+      <span class="dock-stop" id="dock-stop" role="button">중지</span>
+    </button>
+    <div class="dock-bar"><i id="dock-bar"></i></div>
+    <pre class="log" id="log"></pre>
+  </section>
+
+  <!-- HyperFrames 플레이어 — 굽기 전에 컴포지션을 그대로 재생해 본다.
+       자체 호스팅이다(/vendor). CDN 을 쓰면 사내망에서 미리보기가 죽고,
+       그때 「렌더가 고장났다」고 오해한다. -->
+  <script src="/vendor/hyperframes-player.global.js"></script>
+  <script src="/static/js/main.js"></script>
+</body>
+</html>

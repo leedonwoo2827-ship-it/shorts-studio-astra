@@ -1,0 +1,17 @@
+# 기본은 LF. 윈도우에서 작업하더라도 저장소 안은 한 가지로 통일한다 —
+# 섞이면 diff 가 파일 전체로 뜨고 리뷰가 불가능해진다.
+* text=auto eol=lf
+
+# ★ .bat 만 예외로 CRLF 다. LF 로 체크아웃되면 cmd.exe 가 라벨과 goto 를
+#   잘못 읽어 「지정된 파일을 찾을 수 없습니다」로 죽는다 — 원인을 찾기
+#   어려운 종류의 고장이다. tools/lint_repo.py 가 이것도 검사한다.
+*.bat text eol=crlf
+
+*.ttf   binary
+*.woff2 binary
+*.png   binary
+*.jpg   binary
+*.wav   binary
+*.mp3   binary
+*.mp4   binary
+*.pdf   binary

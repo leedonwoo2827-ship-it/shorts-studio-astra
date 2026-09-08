@@ -1,0 +1,179 @@
+/* 세로 쇼츠 9:16 — 화면 규칙.
+ *
+ * ★ 바탕은 어디나 아이보리다. 그림(2:3)을 세로 화면(9:16)에 넣으면 위아래가 남는데,
+ *   남는 자리도 같은 아이보리라 **레터박스가 보이지 않는다.** 이게 이 레이아웃의
+ *   핵심이다 — 그림 비율을 억지로 늘리거나 좌우를 잘라 낼 필요가 없다.
+ *
+ * ★ 그림에는 글자가 없다. 글자는 전부 이 CSS 가 그리는 층이다 — 위 띠의 후크,
+ *   아래 띠의 자막과 해시태그. 그래서 오타 수정도, 모션도, 다국어도 공짜다.
+ */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  width: var(--W); height: var(--H);
+  overflow: hidden;
+  background: var(--ivory);
+  font-family: "Pretendard", "Malgun Gothic", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  position: relative;
+  width: var(--W); height: var(--H);
+  background: var(--ivory);
+}
+
+/* ── 씬 ─────────────────────────────────────────────────────────────── */
+.scene {
+  position: absolute; inset: 0;
+  background: var(--ivory);
+}
+
+/* 그림층 — 폭을 화면에 맞추고 세로로 가운데. 남는 위아래는 아이보리(안 보인다).
+   기본 배율을 1보다 크게 두어 켄번스가 빈 가장자리를 물지 않게 한다. */
+.art {
+  position: absolute;
+  left: 0; width: var(--W);
+  top: calc((var(--H) - var(--artH)) / 2);
+  height: var(--artH);
+  background-position: center center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+/* 움직이는 장면 — 인라인 SVG 가 칸을 그대로 채운다.
+   ★ SVG 를 배경(background-image)으로 넣으면 SMIL 애니메이션이 돌지 않는다.
+     그래서 이 칸만 자식 <svg> 를 직접 늘린다. */
+.art.live { background: none; overflow: hidden; }
+.art.live > svg { display: block; width: 100%; height: 100%; }
+
+/* 그림이 없는 씬 — 빈 화면 대신 옅은 결을 깔아 준다 */
+.art.empty {
+  background-image:
+    repeating-linear-gradient(135deg,
+      color-mix(in srgb, var(--sub-ink) 22%, var(--ivory)) 0 2px,
+      var(--ivory) 2px 22px);
+}
+
+/* 띠 — 그림 위에 아이보리를 부드럽게 얹어 글자 바탕을 만든다.
+   그림의 위아래 15% 가 이미 비어 있으므로 대개 아무 것도 가리지 않는다. */
+.veil {
+  position: absolute; left: 0; width: var(--W);
+  pointer-events: none;
+}
+.veil-top {
+  top: 0; height: calc(var(--bandTop) + 90px);
+  background: linear-gradient(to bottom,
+    var(--ivory) 0%, var(--ivory) 62%,
+    color-mix(in srgb, var(--ivory) 70%, transparent) 86%,
+    transparent 100%);
+}
+.veil-bot {
+  bottom: 0; height: calc(var(--bandBot) + 110px);
+  background: linear-gradient(to top,
+    var(--ivory) 0%, var(--ivory) 66%,
+    color-mix(in srgb, var(--ivory) 70%, transparent) 88%,
+    transparent 100%);
+}
+
+/* ── 위 띠 · 후크 ───────────────────────────────────────────────────── */
+.hook {
+  position: absolute;
+  left: 64px; right: 64px; top: 96px;
+  z-index: 3;
+}
+.hook .h1, .hook .h2 {
+  font-family: "BlackHanSans", "Pretendard", "Malgun Gothic", sans-serif;
+  font-weight: 400;               /* Black Han Sans 는 굵기가 하나다 */
+  font-size: 88px;
+  line-height: 1.06;
+  letter-spacing: -0.02em;
+  white-space: nowrap;      /* 후크는 12자 상한이라 한 줄에 들어간다 */
+}
+.hook .h1 { color: var(--ink); }
+.hook .h2 { color: var(--accent); }
+
+/* 후크 두 번째 줄 아래 밑줄 — GSAP 이 왼→오로 그린다 */
+.hook .rule {
+  height: 10px; width: 100%;
+  margin-top: 16px;
+  background: var(--accent);
+  border-radius: 5px;
+  transform-origin: left center;
+}
+
+/* ── 아래 띠 · 자막 ─────────────────────────────────────────────────── */
+.cc {
+  position: absolute;
+  left: 72px; right: 72px;
+  bottom: 168px;
+  z-index: 4;
+  font-size: 58px;
+  font-weight: 700;
+  line-height: 1.30;
+  letter-spacing: -0.018em;
+  color: var(--text);
+  text-align: center;
+  text-wrap: balance;
+  /* ★ 한글은 브라우저가 기본으로 **아무 데서나** 줄을 끊는다. 그대로 두면
+     「없었습 / 니다」처럼 낱말 가운데가 갈린다(실측). keep-all 로 어절 경계에서만
+     끊고, 한 어절이 한 줄보다 길 때만 break-word 가 받아 준다. */
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+/* 해시태그 — 30초 내내 한 자리에 있다 */
+.tags {
+  position: absolute;
+  left: 0; right: 0; bottom: 86px;
+  z-index: 4;
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: color-mix(in srgb, var(--ink) 58%, var(--ivory));
+  text-align: center;
+}
+
+/* ── 진행 레일 — 위 띠 맨 아래. 씬이 몇 개고 지금 몇 번째인지 보인다 ── */
+.rail {
+  position: absolute;
+  left: 64px; right: 64px; top: 56px;
+  height: 8px;
+  z-index: 5;
+  display: flex; gap: 10px;
+}
+.rail .seg {
+  flex: 1; height: 100%;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ink) 16%, var(--ivory));
+  overflow: hidden;
+}
+.rail .seg > i {
+  display: block; height: 100%; width: 100%;
+  background: var(--accent);
+  transform-origin: left center;
+}
+
+/* ── 강조 SVG — 씬마다 하나. 그림 위에 얹혀 시선을 끈다 ────────────── */
+.accent {
+  position: absolute; inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.accent .ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 9;
+  stroke-linecap: round;
+}
+.accent .arrow {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.accent .dot { fill: var(--accent); }

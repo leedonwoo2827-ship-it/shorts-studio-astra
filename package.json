@@ -1,0 +1,16 @@
+{
+  "name": "shorts-astra",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "단행본 한 장(章) → 9:16 30초 모션 쇼츠. HyperFrames + Claude 구독 OAuth + ChatGPT 이미지 + Supertonic 3.",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "doctor": "hyperframes doctor"
+  },
+  "dependencies": {
+    "@hyperframes/player": "0.8.20",
+    "@hyperframes/producer": "0.8.20",
+    "hyperframes": "0.8.20"
+  }
+}

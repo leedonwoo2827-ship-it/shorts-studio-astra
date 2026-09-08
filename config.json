@@ -1,0 +1,95 @@
+{
+  "port": 8899,
+  "auth": "claude-code",
+  "models": {
+    "script": "claude-opus-5",
+    "meta": "claude-sonnet-5",
+    "artspec": "claude-opus-5"
+  },
+  "effort": {
+    "script": "high",
+    "meta": "medium",
+    "artspec": "high"
+  },
+  "budget_usd": {
+    "per_stage": 1.5,
+    "warn_total": 5.0
+  },
+  "shorts": {
+    "_주석": "씬 3개 고정 · 20~24초. 정지 그림이면 3씬 30초가 지루해 컷을 늘려야 하지만, 장면이 움직이면 한 씬이 8초를 버틴다. 그리고 씬 하나가 아스트라 2분 반 + 한도 소모라 씬 수가 곧 비용이다.",
+    "_끝맺음": "24초를 넘어도 된다. 마지막 장면은 SVG 가 계속 도니까, 화면을 멈춰 둔 채 마무리 말을 더 얹어도 어색하지 않다. 예산은 목표이고 상한이 아니다.",
+    "cuts": 4,
+    "cuts_max": 6,
+    "seconds": 24.0,
+    "gap_sec": 0.12,
+    "_씬수": "한 방향 동작이면 한 씬이 한 걸음만 보여 준다. 이야기를 하려면 걸음이 더 필요하니 4가 기준이다. 그림이 바뀌어야 하면 씬을 늘려라 — 한 씬 안에서 장면을 바꾸면 그건 컷이고, 컷은 씬이 하는 일이다. 씬 하나가 아스트라 2분 30초 + 한도라 씬 수가 곧 비용이다."
+  },
+  "narration": {
+    "_주석": "chars_per_sec 는 speed 1.0 기준 실측치이고 **엔진마다 다르다**. 예산 = (seconds - 씬사이 숨) × cps × speed.",
+    "_실측": "edge/ko-KR-SunHiNeural: 184자 → 23.54초 (speed 1.2, 3씬, 2026-09-08) → cps 6.51. 참고로 Supertonic F2 는 41_26 표본에서 5.53 이었다 — engine 을 바꾸면 이 값도 바꿔라.",
+    "chars_per_sec": 6.51,
+    "voice": "F2",
+    "speed": 1.2,
+    "total_step": 8
+  },
+  "compose": {
+    "aspect": "9:16",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "band_top": 300,
+    "band_bottom": 320,
+    "ivory": "#F6F1E8",
+    "ink": "#1F4E79",
+    "accent": "#E07A2F",
+    "text": "#334155",
+    "sub_ink": "#9DC3E6",
+    "point": "#DEEBF7"
+  },
+  "image": {
+    "_주석": "세로 2:3 판. 위 15% / 아래 15% 는 아이보리로 비워 둔다 — 그 자리에 후크와 자막이 얹힌다. style/negative 는 41_26 에서 검증된 문자열이다.",
+    "_모델주석": "codex debug models 목록과 이 엔드포인트가 받아 주는 목록이 다르다. 실측 2026-09-08: gpt-5.5=404, gpt-5.4=계정거부, gpt-5.4-mini=통함. 안 되면 tools/probe_image_model.py 로 통하는 이름을 찾아라.",
+    "model": "gpt-5.4-mini",
+    "size": "1024x1536",
+    "format": "png",
+    "reserve_top_pct": 15,
+    "reserve_bottom_pct": 15,
+    "style_hint": "진한 파랑(#1F4E79)과 밝은 파랑(#9DC3E6) 중심, 슬레이트(#334155) 윤곽선, 포인트로 옅은 하늘색(#DEEBF7). 플랫 벡터에 은은한 입체감, 균일한 선 굵기",
+    "negative": "dark background, black background, night scene, dark panel, vignette, dark vignette, darkened edges, dark corners, dark gradient, glow, bloom, neon glow, backlit, spotlight on dark, inverted color scheme, light text on dark background, low contrast text, watermark, logo, text, letters, words, caption, title, label, typography, low quality, distorted, extra limbs",
+    "concurrency": 2,
+    "retries": 2
+  },
+  "art": {
+    "_주석": "장면 제작 — 아스트라가 애니메이션 SVG 를 코드로 쓴다. 가장 비싼 단계다.",
+    "_모델": "gpt-6-astra 는 codex-cli 0.153 이상에서만 불린다. 0.137 은 'requires a newer version' 을 낸다. 가벼운 시험은 gpt-5.6-sol 로 하고 최종만 astra 로 하면 5시간 한도를 아낀다.",
+    "model": "gpt-6-astra",
+    "timeout_sec": 600,
+    "retries": 1,
+    "_화풍": "style_refs 의 그림을 codex exec -i 로 아스트라에게 함께 보여 준다. 말로 「플랫 벡터」라고 적는 것보다 그림 한 장이 확실하다. 화풍을 바꾸려면 assets/style_ref/ 의 파일을 갈아 끼워라.",
+    "style_refs": [
+      "assets/style_ref/01_인물.png",
+      "assets/style_ref/02_마을.png",
+      "assets/style_ref/03_대비.png",
+      "assets/style_ref/04_도시.png"
+    ]
+  },
+  "render": {
+    "quality": "standard",
+    "format": "mp4",
+    "workers": 0
+  },
+  "tts": {
+    "_주석": "engine: edge(무료·온라인·설치 한 줄) · voicewright(고품질 Supertonic, dir 를 적어야 함) · none. 이 레포는 edge 를 기본으로 자립한다.",
+    "engine": "edge",
+    "edge_voice": {
+      "F1": "ko-KR-SunHiNeural",
+      "F2": "ko-KR-SunHiNeural",
+      "M1": "ko-KR-InJoonNeural",
+      "M2": "ko-KR-HyunsuMultilingualNeural"
+    },
+    "python": null,
+    "voicewright_dir": null,
+    "assets_dir": null,
+    "timeout_ms": 300000
+  }
+}
