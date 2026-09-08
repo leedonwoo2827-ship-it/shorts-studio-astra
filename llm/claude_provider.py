@@ -146,7 +146,13 @@ class ClaudeProvider:
             #   "Reached maximum number of turns (1)" 로 죽었다). 그 왕복 다음에
             #   진짜 답을 낼 턴이 하나 더 있어야 한다. 도구 없이 브리프만으로
             #   답하는 단계라도 max_turns 는 최소 1 을 넘겨 둔다.
-            max_turns = max(max_turns, 3)
+            #
+            # ★ 3 으로도 모자랐다(실측 2026-09-08: 「결과」 단계가
+            #   "Reached maximum number of turns (3)" 로 죽었다). 도구를 두 번
+            #   시도했다 거절당하면 답할 턴이 남지 않는다. 넉넉히 둔다 —
+            #   **돈은 `max_budget_usd` 가 막고 있으니 턴 수로 조일 이유가 없다.**
+            #   턴으로 조이면 아낀 것 없이 그때까지 쓴 돈만 날아간다.
+            max_turns = max(max_turns, 8)
         else:
             # ★ 이 프로젝트에서 더한 것 — 원본은 disallowed 가 고정이라
             #   allowed_tools=["WebSearch"] 를 줘도 같은 이름이 차단 목록에 남아
