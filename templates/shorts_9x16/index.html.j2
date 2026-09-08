@@ -324,8 +324,36 @@
           }
         }
       }
-      tl.eventCallback("onUpdate", syncSmil);
+      /* ── clip 창 밖은 숨긴다 ────────────────────────────────────────────
+         ★ `.clip` 은 `data-start`·`data-duration` 이 붙은 조각이고, **렌더할 때는
+           HyperFrames 가** 그 시각 밖의 조각을 빼고 그린다. 그런데 브라우저에는
+           그 장치가 없어서, 미리보기에서는 여덟 씬의 자막이 아래 띠에 한꺼번에
+           겹쳐 뭉쳤다 — 굽기 전에 보라고 만든 화면이 실제와 다른 것을 보여 줬다.
+
+         ★ `display` 로 껐다 켠다. GSAP 의 `autoAlpha` 는 opacity·visibility 를
+           쥐고 있어서 같은 것을 건드리면 서로 덮어쓴다. 결이 다른 손잡이를 쓴다.
+
+         ★ 타임라인은 **손대지 않았다.** 여기서 페이드를 하나 더 넣으면 실제 영상이
+           바뀐다 — 고쳐야 할 것은 미리보기지 결과물이 아니다. */
+      const CLIPS = Array.prototype.map.call(
+        document.querySelectorAll(".clip"),
+        function (el) {
+          return { el: el,
+                   s: parseFloat(el.dataset.start || "0") || 0,
+                   d: parseFloat(el.dataset.duration || "0") || 0 };
+        });
+      function gateClips() {
+        const t = tl.time();
+        for (let i = 0; i < CLIPS.length; i++) {
+          const c = CLIPS[i];
+          const on = c.d > 0 ? (t >= c.s && t < c.s + c.d) : (t >= c.s);
+          c.el.style.display = on ? "" : "none";
+        }
+      }
+
+      tl.eventCallback("onUpdate", function () { syncSmil(); gateClips(); });
       syncSmil();
+      gateClips();
 
       window.__timelines["main"] = tl;
     </script>
