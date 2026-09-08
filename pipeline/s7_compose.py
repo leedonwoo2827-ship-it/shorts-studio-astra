@@ -251,7 +251,32 @@ def phase_svg(svg: str, start: float) -> tuple:
     거기에 우리가 값을 더하면 그 순서를 다시 해석하는 셈이다.
     돌려주는 것은 무엇을 몇 개 바꿨는지다(로그로 보여 준다).
     """
-    stat = {"begin": 0, "freeze": 0, "kept": 0}
+    stat = {"begin": 0, "shift": 0, "freeze": 0, "kept": 0}
+
+    def shift_begin(val: str) -> Optional[str]:
+        """`begin` 값에 씬 시작을 **더한다.** 못 더하면 None.
+
+        ★ 모델은 씬 안의 상대 시각으로 적는다 — 「0.4초에 시작」. 그런데 SMIL
+          시계는 **문서 전체 시간**이라 그대로 두면 문서 0.4초에 터진다.
+          씬 2 는 5.45초에 뜨는데 그 애니메이션은 이미 끝나 있다 —
+          **정지 화면으로 나온다.** 실측(2026-09-08)으로 씬 2·3·4 가 그랬다.
+
+        `a.end` 처럼 다른 요소를 가리키는 값은 건드리지 않는다. 그것까지 손대면
+        모델이 짠 순서를 우리가 다시 해석하는 셈이고, 그러다 깨진다.
+        """
+        parts = [x.strip() for x in val.split(";") if x.strip()]
+        if not parts:
+            return None
+        out = []
+        for x in parts:
+            m2 = re.fullmatch(r"([+-]?(?:\d+\.?\d*|\.\d+))(s|ms)?", x)
+            if not m2:
+                return None            # id 참조·indefinite·wallclock 등
+            n = float(m2.group(1))
+            if m2.group(2) == "ms":
+                n /= 1000.0
+            out.append(f"{n + start:.3f}s")
+        return ";".join(out)
 
     def fix(m: "re.Match[str]") -> str:
         tag = m.group(0)
@@ -259,11 +284,17 @@ def phase_svg(svg: str, start: float) -> tuple:
         inner = tag.rstrip()[:-2] if self_close else tag.rstrip()[:-1]
         inner = inner.rstrip()
 
-        if _HAS_BEGIN.search(inner):
-            stat["kept"] += 1
-        else:
+        mb = re.search(r'\bbegin\s*=\s*"([^"]*)"', inner, re.IGNORECASE)
+        if mb is None:
             inner += f' begin="{start:.3f}s"'
             stat["begin"] += 1
+        else:
+            moved = shift_begin(mb.group(1))
+            if moved is None:
+                stat["kept"] += 1      # 참조식 — 그대로 둔다
+            else:
+                inner = inner[:mb.start()] + f'begin="{moved}"' + inner[mb.end():]
+                stat["shift"] += 1
 
         if _REPEAT.search(inner):
             inner = _REPEAT.sub("", inner).rstrip()
@@ -370,10 +401,10 @@ def run(slug: str, *, on_log: Optional[Callable[[str], None]] = None) -> Dict[st
             # ★ 씬이 화면에 뜨는 순간에 애니메이션도 시작하게 위상을 맞춘다.
             #   안 맞추면 씬마다 다른 지점에서 시작해 화면이 안절부절못한다.
             sc["svg"], ph = phase_svg(sc["svg"], sc["start"])
-            if ph["begin"] or ph["freeze"]:
-                log(f"  씬 {sc['no']} 위상 맞춤 — 시작 {ph['begin']}개 · "
-                    f"한 번만 돌고 멈춤 {ph['freeze']}개"
-                    + (f" · 모델이 정한 순서 유지 {ph['kept']}개" if ph["kept"] else ""))
+            if any(ph.get(k) for k in ("begin", "shift", "freeze")):
+                log(f"  씬 {sc['no']} 위상 맞춤 — 씬 시작으로 밀기 {ph['shift']}개 · "
+                    f"시작 주입 {ph['begin']}개 · 한 번만 돌고 멈춤 {ph['freeze']}개"
+                    + (f" · 참조식 유지 {ph['kept']}개" if ph["kept"] else ""))
             if n < 0:
                 log(f"  ⚠ 씬 {sc['no']}: SMIL 이 id 를 값으로 참조해 접두어를 "
                     f"붙이지 않았습니다 — 다른 씬과 id 가 겹치면 그림이 사라집니다")
