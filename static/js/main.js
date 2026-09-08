@@ -876,14 +876,16 @@ PAGES.storyboard = async (m) => {
   const hf = Object.assign({ line1: first.hook_line1 || "", line2: first.hook_line2 || "" },
                            d.hook_fixed || {});
   const hc = card("후크",
-    "화면 위 띠에 얹혀 영상 내내 바뀌지 않습니다. 한 줄 12자, 마침표 없이. "
-    + "첫 줄은 상황을 세우고(잉크색), 둘째 줄이 뒤집습니다(주황).");
+    "화면 위 띠에 얹혀 영상 내내 바뀌지 않습니다. 한 줄 16자 이내. "
+    + "1줄은 질문(잉크색), 2줄은 무드 형용사 + 「~보세요」로 닫습니다(줄 전체 주황) — "
+    + "유형이 갈리는 자리가 2줄의 형용사입니다.");
   const hi = [];
   const hrow = el("div", "row");
-  [["line1", hf.line1, "1줄 · 상황 (12자)"], ["line2", hf.line2, "2줄 · 뒤집기 (12자)"]]
+  [["line1", hf.line1, "1줄 · 질문 (16자) — 21살 학생이 세상을 바꿨다?"],
+   ["line2", hf.line2, "2줄 · 무드 + ~보세요 (16자) — 설레는 시작을 만나보세요"]]
     .forEach(([k, v, ph]) => {
       const inp = Object.assign(document.createElement("input"),
-        { type: "text", value: v || "", maxLength: 12, placeholder: ph });
+        { type: "text", value: v || "", maxLength: 16, placeholder: ph });
       inp.className = "grow";
       inp.disabled = !!S.cfg?.readonly;
       hi.push([k, inp]);
