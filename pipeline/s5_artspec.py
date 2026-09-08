@@ -54,6 +54,10 @@ def band_note(width: int, height: int, top: int, bottom: int, ivory: str) -> str
 #   정지한 화면 위로 마무리 말이 얹힌다 — 사용자가 정한 마무리 모양이다.
 CLOSE_MOTION_RATIO = 0.6
 
+# 그림칸 비율 — `s7_compose.ART_RATIO` 와 **같은 값이어야 한다.**
+# 다르면 두루마리 칸이 카메라 걸음과 안 맞아 첫 칸·마지막 칸이 잘린다.
+ART_RATIO = 3 / 2
+
 _LOOPY = ("주기", "반복", "왕복", "흔들", "깜빡", "진동", "오간다", "오가며",
           "되돌아", "되풀이", "번갈아", "커졌다", "작아졌다", "눌렸다",
           "펄럭", "출렁", "떨린")
@@ -145,6 +149,24 @@ def run(slug: str, *, on_activity: Optional[Callable[[str], None]] = None
     ivory = c.get("ivory", "#F6F1E8")
     width, height = int(c.get("width", 1080)), int(c.get("height", 1920))
     top, bottom = int(c.get("band_top", 300)), int(c.get("band_bottom", 320))
+
+    # ★★ **칸 하나는 화면 높이가 아니라 그림칸 높이다.**
+    #
+    # 실측(2026-09-08): 아스트라에게 「칸 하나가 1080x1920, 위 300 / 아래 320 을
+    # 비워라」고 알려 줬는데 실제 그림칸(`.art`)은 1080x**1620** 이다.
+    # `preserveAspectRatio="slice"` 가 두루마리 위아래를 450px 씩 잘라내서
+    #     칸1  viewBox  450~2070   ← 그릴 자리 300~450 이 잘려 나갔다
+    #     칸3  viewBox 3690~5310   ← 그릴 자리 5310~5440 이 잘려 나갔다
+    # **첫 칸은 위가, 마지막 칸은 아래가 잘렸고** 그림이 위로 밀려 띠에 걸쳤다.
+    #
+    # 칸 높이를 `art_h` 로 잡으면 두루마리 높이와 카메라 판 높이가 같아져
+    # 잘림이 없어지고, 카메라 한 걸음이 칸 하나에 정확히 떨어진다.
+    # 비울 자리도 그림칸 기준으로 다시 잰다 — 그림칸이 화면 가운데에 놓이므로
+    # 위아래로 `(height - art_h)/2` 만큼 이미 띠 밖이다.
+    cell_h = int(round(width * ART_RATIO))
+    pad = (height - cell_h) // 2
+    res_top = max(0, top - pad)
+    res_bot = max(0, bottom - pad)
 
     cells_per = max(1, int(config.get("art.cells_per_scroll", 3)))
     max_scrolls = max(1, int(config.get("art.max_scrolls", 4)))
@@ -303,10 +325,10 @@ def run(slug: str, *, on_activity: Optional[Callable[[str], None]] = None
             "support": (r.get("support") or "").strip(),
             "palette_note": (r.get("palette_note") or "").strip(),
             # ── 두루마리 ──
-            # `canvas_h` 는 칸 수 x 화면 높이다. 아스트라가 이 높이로 viewBox 를
+            # `canvas_h` 는 칸 수 x **그림칸 높이**다(화면 높이가 아니다). 아스트라가 이 높이로 viewBox 를
             # 잡고, 카메라가 칸 사이를 끊어 뛴다. 값은 코드가 정한다 — 모델이
             # 정하면 칸 경계가 화면과 안 맞아 그림이 반쪽으로 잘린다.
-            "canvas_h": height * len(cells),
+            "canvas_h": cell_h * len(cells),
             "cells": cells,
             "beats": beats,
             "camera": cam,
@@ -317,8 +339,10 @@ def run(slug: str, *, on_activity: Optional[Callable[[str], None]] = None
         "slug": slug,
         "title": doc.get("title") or "",
         "canvas": {"width": width, "height": height,
-                   "band_top": top, "band_bottom": bottom},
-        "band_note": band_note(width, height, top, bottom, ivory),
+                   "band_top": top, "band_bottom": bottom,
+                   # ★ 아스트라가 실제로 쓰는 규격. 화면 높이가 아니라 그림칸이다.
+                   "cell_h": cell_h, "reserve_top": res_top, "reserve_bottom": res_bot},
+        "band_note": band_note(width, cell_h, res_top, res_bot, ivory),
         "style_hint": img.get("style_hint", ""),
         "palette": {"ivory": ivory, "ink": c.get("ink", "#1F4E79"),
                     "sub_ink": c.get("sub_ink", "#9DC3E6"),

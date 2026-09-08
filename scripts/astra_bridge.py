@@ -215,8 +215,12 @@ def build_prompt(job: Dict[str, Any], sc: Dict[str, Any]) -> str:
       실측(2026-09-08): 「백만 중 열에 하나」에 광부 사택 부엌을 그렸다.
     """
     c, pal = job["canvas"], job["palette"]
-    w, cell_h = int(c["width"]), int(c["height"])
-    top, bot = int(c["band_top"]), int(c["band_bottom"])
+    w = int(c["width"])
+    # ★ 칸 높이와 비울 자리는 **그림칸 기준**이다(화면 높이가 아니다).
+    #   `s5_artspec` 이 canvas 에 실어 준다. 옛 장면지시에는 없으니 화면 값으로 받는다.
+    cell_h = int(c.get("cell_h") or c["height"])
+    top = int(c.get("reserve_top", c["band_top"]))
+    bot = int(c.get("reserve_bottom", c["band_bottom"]))
     # 두루마리 — 칸 N 개면 높이가 N 배다. 칸 하나면 예전과 같은 한 화면이다.
     cells = list(sc.get("cells") or [])
     n_cells = max(1, len(cells))
@@ -376,7 +380,7 @@ def main() -> int:
         timeout = int(job.get("timeout_sec") or 600)
         retries = int(job.get("retries") or 1)
         w = int(job["canvas"]["width"])
-        cell_h = int(job["canvas"]["height"])
+        cell_h = int(job["canvas"].get("cell_h") or job["canvas"]["height"])
 
         # ★ 씬을 **하나씩 차례로** 부른다. 아스트라는 5시간 한도가 빡빡해서
         #   동시에 여러 개를 던지면 중간에 끊기고, 그때 어디까지 됐는지 모른다.
