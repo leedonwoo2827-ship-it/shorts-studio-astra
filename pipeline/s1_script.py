@@ -57,7 +57,7 @@ def _clean_hashtags(tags: List[str]) -> List[str]:
             continue
         seen.add(t)
         out.append(t)
-    return out[:5]
+    return out[:10]
 
 
 def _budget_report(scenes: List[Dict[str, Any]],

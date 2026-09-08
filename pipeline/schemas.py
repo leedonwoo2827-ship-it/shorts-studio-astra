@@ -53,8 +53,12 @@ SCRIPT_SCHEMA: Dict[str, Any] = {
                 "mark": {"type": "string", "maxLength": HOOK_MAX},
             },
         },
+        # ★ 태그는 **검색에 걸리라고** 다는 것이다. 다섯 개 상한을 두었더니
+        #   「#오픈소스 #리눅스 #자유소프트웨어 #오픈코스웨어 #무크」처럼 넓은 일반어만
+        #   남고 정작 사람이 찾는 이름(#MIT #토르발스 #제록스)이 밀려났다. 쇼츠공방 I
+        #   은 같은 장에 여덟 개를 달았고 절반이 고유명사였다.
         "hashtags": {
-            "type": "array", "minItems": 2, "maxItems": 5,
+            "type": "array", "minItems": 5, "maxItems": 10,
             # 해시태그 한 개. 공백 금지는 코드(_clean_hashtags)가 잡는다 —
             # 스키마에 백슬래시 이스케이프를 넣으면 파일마다 다르게 새어 나간다.
             "items": {"type": "string", "minLength": 2, "maxLength": 21,

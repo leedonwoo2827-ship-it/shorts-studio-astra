@@ -607,16 +607,14 @@ PAGES.plan = async (m) => {
     "위에서 아래로 순서대로 누르세요. 재료를 갈아 놓지 않고 대본을 부르면 "
     + "대본이 첫 단락만 잡고 뒷장을 버립니다."));
 
+  /* ★ 이 화면에 **있는 구간만** 가리킨다. 스토리보드로 옮긴 발음·음성·자막·
+   *   장면 지시가 남아 있어서, 눌러도 아무 데도 안 가는 칩이 넷이었다.
+   *   화면에 없는 것을 가리키는 안내는 안내가 아니라 고장이다. */
   m.appendChild(jumpBar([
     ["sec-source", "재료", stt("source")],
     ["sec-draft", "원고", stt("draft")],
     ["sec-structure", "구조", stt("structure")],
     ["sec-script", "대본", stt("script")],
-    ["sec-scenes", "씬", stt("script")],
-    ["sec-speech", "발음", stt("speech")],
-    ["sec-tts", "음성", stt("tts")],
-    ["sec-subs", "자막", stt("subs")],
-    ["sec-artspec", "장면 지시", stt("artspec")],
   ]));
 
   /* ── 0 · 이 장(章)이 무엇인가 ───────────────────────────────────────
@@ -778,6 +776,13 @@ PAGES.plan = async (m) => {
     ));
     (d.warnings || []).forEach((w) => c.appendChild(el("div", "note", w)));
     c.appendChild(runRow("script", "대본 다시 쓰기", { fmt: fmt.value }));
+    if ((d.scenes || []).length) {
+      const go2 = el("button", "btn primary", "스토리보드로 →");
+      go2.type = "button";
+      go2.onclick = () => go("storyboard");
+      c.appendChild(row(go2, el("span", "hint",
+        "자막·발음·음성·자막나누기·장면 지시는 스토리보드에서 이어집니다.")));
+    }
     if (d.hook_fixed?.line1) {
       c.appendChild(el("div", "hint",
         `고정 후크 「${d.hook_fixed.line1} / ${d.hook_fixed.line2 || ""}」`
