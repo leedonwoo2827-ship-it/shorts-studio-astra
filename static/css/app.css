@@ -611,3 +611,79 @@ table.board tbody th.ch { display: flex; align-items: baseline; gap: 8px; }
 .cellbox.source, .cellbox.draft, .cellbox.structure { color: var(--text-2); background: var(--bone); }
 /* 장의 공용 단계(원고·구조) — 유형과 무관하므로 유형 칸과 다른 색으로 조용히 */
 .chmat { font-size: var(--t-2xs); color: var(--text-3); }
+
+/* ── 씬 한 줄 ──────────────────────────────────────────────────────────
+   슬라이드 · 씬 · 자막 · 발음 · 소리. 한 씬이 한 줄이라 눈이 위아래로 안 뛴다. */
+.sceneline {
+  background: var(--bone); border-radius: var(--r);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  padding: 10px 12px; margin-bottom: 8px;
+}
+.srow {
+  display: grid; align-items: start; gap: 12px;
+  grid-template-columns: 74px 78px minmax(0, 1.15fr) minmax(0, 1fr) 96px;
+}
+.srow.nonarr { grid-template-columns: 74px 78px minmax(0, 1fr) 96px; }
+.srow.shead {
+  background: none; box-shadow: none; padding: 0 12px 6px;
+  font-size: var(--t-2xs); font-weight: 800; color: var(--text-3);
+  letter-spacing: .04em; margin-bottom: 2px;
+}
+.srow textarea { width: 100%; }
+
+/* 슬라이드 — 9:16 조각. **장면 제작 전에는 비어 있는 것이 맞다.**
+   이 칸이 채워졌는지가 곧 그 씬이 그려졌는지다. */
+.slide {
+  width: 74px; aspect-ratio: 9 / 16; border-radius: var(--r-sm);
+  background: var(--paper-deep); overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.slide object, .slide img { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.slide.empty {
+  display: grid; place-items: center;
+  font-size: 10px; color: var(--text-3);
+  background: repeating-linear-gradient(45deg,
+    var(--paper) 0 6px, var(--paper-deep) 6px 12px);
+}
+
+.smeta { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
+.smeta .no {
+  width: 22px; height: 22px; border-radius: var(--r-sm);
+  background: var(--brand); color: #fff;
+  display: grid; place-items: center; font-size: var(--t-2xs); font-weight: 800;
+}
+.smeta .role {
+  font-size: 10px; font-weight: 800; color: var(--text-3);
+  letter-spacing: .05em; text-transform: uppercase;
+}
+.scell { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.scell.snd { align-items: flex-start; }
+.scell .hint { margin: 0; font-size: 10px; }
+
+@media (max-width: 1100px) {
+  /* 좁아지면 세로로 접는다 — 가로 스크롤보다 낫다 */
+  .srow, .srow.nonarr { grid-template-columns: 74px minmax(0, 1fr); }
+  .srow.shead { display: none; }
+  .smeta { flex-direction: row; align-items: center; }
+}
+
+/* 슬라이드에 얹는 글자 — 완성 화면과 같은 모양(위 띠 후크 · 아래 띠 자막).
+   장면이 없어도 얹는다. 글자가 넘치는지 잘리는지가 여기서 미리 보인다. */
+.slide { position: relative; }
+.sl-hook {
+  position: absolute; left: 0; right: 0; top: 0;
+  padding: 3px 3px 2px; text-align: center; line-height: 1.15;
+  background: rgb(246 241 232 / .93);
+}
+.sl-hook .l1 { font-size: 7px; font-weight: 800; color: #1F4E79; }
+.sl-hook .l2 { font-size: 7px; font-weight: 800; color: #E07A2F; }
+.sl-cap {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 3px; font-size: 6px; line-height: 1.25; text-align: center;
+  color: #334155; background: rgb(246 241 232 / .93);
+  max-height: 44%; overflow: hidden;
+}
+.sl-tag {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  font-size: 9px; color: var(--text-3);
+}

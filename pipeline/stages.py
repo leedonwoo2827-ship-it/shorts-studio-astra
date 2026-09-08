@@ -107,7 +107,7 @@ GROUPS: List[Group] = [
     Group("plan", "대본 만들기", primary=True,
           stages=("source", "draft", "structure",
                   "script", "speech", "tts", "subs", "artspec"),
-          screens=("plan",),
+          screens=("plan", "storyboard"),
           hint="원문에서 원고·구조를 뽑고 대본·음성·자막·장면 지시까지. "
                "원고·대본·장면 지시가 크레딧을 씁니다."),
     Group("video", "영상 만들기",
@@ -134,9 +134,15 @@ SCREENS: List[Screen] = [
     #   구조.json 이 없다고 죽는다. 순서가 곧 일이라면 순서가 보여야 한다.
     #   길어지는 것은 좌측 레일과 이 면 위의 건너뛰기 줄이 맡는다.
     # 이름을 묶음(「대본 만들기」)과 다르게 둔다 — 같으면 레일에 같은 말이 두 줄 뜬다
-    Screen("plan", "재료 · 대본",
-           ("source", "draft", "structure", "script", "speech", "tts", "subs", "artspec"),
-           "재료를 갈고 대본을 확정하는 일 전부 — 위에서 아래로 순서대로."),
+    Screen("plan", "대본",
+           ("source", "draft", "structure", "script"),
+           "재료를 갈아 대본을 뽑는 데까지 — 위에서 아래로 순서대로."),
+    # ★ 대본에서 **스토리보드를 갈랐다.** 앞은 「글을 만드는 일」이고 뒤는
+    #   「그 글을 씬으로 세우는 일」이다. 한 면에 다 두면 대본을 뽑으러 들어와서
+    #   음성·자막까지 스크롤로 지나가게 된다.
+    Screen("storyboard", "스토리보드",
+           ("speech", "tts", "subs", "artspec"),
+           "씬마다 자막·발음·소리를 맞추고 장면 지시까지. 대본이 씬으로 서는 자리."),
     Screen("art", "장면 제작", ("art",),
            "아스트라가 움직이는 장면을 코드로 씁니다."),
     Screen("compose", "미리보기", ("compose",),

@@ -323,118 +323,148 @@ function saveBtn(url, ta) {
   return save;
 }
 
-/* 씬 편집 — 발음 탭과 자막 탭이 같은 부품을 쓴다. **사람 손이 이긴다.**
- * ★ 고친 값은 `overrides` 가 아니라 script.json 에 바로 들어가고, 서버가 자막
- *   큐를 다시 나눈다. 그리고 발음을 고친 씬은 음성 스탬프가 어긋나 다음
- *   「음성」에서 **그 씬만** 다시 굽는다 — 전부 다시 굽지 않는다. */
-/* ── 사실검증 ─────────────────────────────────────────────────────────
-   ★ **AI 는 고치지 않는다.** 판정과 대안만 그리고, 적용은 사람이 누른다.
-     자동으로 갈아 끼우면 손으로 다듬어 놓은 문장까지 덮어쓴다 — 쇼츠공방 I 이
-     「전체 재작성」을 만들어 놓고 화면에서 뺀 이유가 그것이다. */
-function verifyBox(no, v) {
-  const box = el("div", "verify " + (v.ok ? "ok" : "ng"));
-  box.appendChild(row(
-    el("span", "vtag", v.ok ? "OK" : "NG"),
-    el("span", "vreason", v.reason || (v.ok ? "근거와 맞습니다" : "")),
-  ));
-  if ((v.alts || []).length) {
-    const alts = el("div", "alts");
-    alts.appendChild(el("div", "hint", "대안을 누르면 그 문장으로 바뀝니다."));
-    v.alts.forEach((t) => {
-      const a = el("button", "alt", t);
-      a.type = "button";
-      a.disabled = !!S.cfg?.readonly;
-      a.onclick = async () => {
-        a.disabled = true;
-        try {
-          await post(`/api/projects/${encodeURIComponent(S.slug)}/verify/apply`,
-            { no, text: t });
-          await loadProject(S.slug);
-          render();
-        } catch (e) { alert(e.message); a.disabled = false; }
-      };
-      alts.appendChild(a);
-    });
-    box.appendChild(alts);
-  }
-  return box;
-}
-
-function sceneEditor(d, { showSource, showNarration, showVerify } = {}) {
+/* 씬 편집 — **한 씬이 한 줄이다.**
+ *
+ * ★ 예전에는 한 씬이 세로로 쌓인 칸 여럿이었다. 스물두 씬이면 화면이 스물두 번
+ *   접히고, 「이 씬의 자막과 발음이 서로 맞나」를 보려면 눈이 위아래로 오간다.
+ *   가로로 세우면 **한 눈에 한 씬이 다 보인다** — 슬라이드·자막·발음·소리.
+ *
+ * ★ 왼쪽 슬라이드 칸은 「장면 제작」 전에는 비어 있다. 비워 두는 것이 맞다 —
+ *   그 자리가 채워졌는지가 곧 이 씬이 그려졌는지다.
+ *
+ * ★ **사람 손이 이긴다.** 고친 값은 script.json 에 바로 들어가고 서버가 자막 큐를
+ *   다시 나눈다. 발음을 고친 씬은 음성 스탬프가 어긋나 그 씬만 다시 굽는다.
+ */
+function sceneEditor(d, { showSource, showNarration, showVerify, showArt } = {}) {
   const ro = !!S.cfg?.readonly;
+  const enc = encodeURIComponent(S.slug);
   const c = card("씬",
-    "고치면 「저장」을 누르세요. 발음을 고친 씬은 다음 「음성」에서 그 씬만 다시 굽습니다.");
+    "한 줄이 한 씬입니다. 고치면 「저장」을 누르세요 — 자막을 고치면 큐가 다시 나뉘고, "
+    + "발음을 고친 씬은 그 씬만 다시 굽습니다.");
   const edits = {};
 
+  const headRow = el("div", "srow shead");
+  ["", "씬", "자막 (= 말)", showNarration ? "발음 (읽는 글자)" : "", "소리", ""]
+    .forEach((t, i) => { if (i !== 3 || showNarration) headRow.appendChild(el("div", null, t)); });
+  c.appendChild(headRow);
+
   (d.scenes || []).forEach((s) => {
-    const box = el("div", "scene");
-    const h = el("div", "scene-head");
-    h.appendChild(el("span", "no", String(s.no)));
-    h.appendChild(el("span", "role", s.role || "body"));
-    h.appendChild(el("span", "pill",
-      s.audio_sec ? `${s.audio_sec.toFixed(1)}초` : "소리 없음"));
-    h.appendChild(el("span", "grow"));
-    if (s.audio_sec) {
-      const play = el("button", "btn sm", "▶ 듣기");
-      play.type = "button";
-      play.onclick = () =>
-        new Audio(`/api/projects/${encodeURIComponent(S.slug)}/audio/${s.no}`).play();
-      h.appendChild(play);
+    const wrap = el("div", "sceneline");
+    const rowEl = el("div", "srow" + (showNarration ? "" : " nonarr"));
+
+    /* ① 슬라이드 — **비어 있어도 미리보기 노릇을 한다.**
+     *   장면이 아직 없을 때도 후크와 자막을 얹어 두면, 그 칸이 곧 완성 화면의
+     *   축소판이 된다. 글자가 띠 밖으로 넘치는지, 후크가 잘리는지가 여기서 보인다.
+     *   실제 화면도 「장면에는 글자가 없고 글자는 전부 위에 얹는 층」이라 같은 모양이다. */
+    const slide = el("div", "slide");
+    const art = (S.proj?.art || {})[String(s.no)] || (S.proj?.art || {})[s.no];
+    if (art) {
+      const o = document.createElement("object");
+      o.type = String(art).toLowerCase().endsWith(".svg") ? "image/svg+xml" : "";
+      o.data = `/api/projects/${enc}/art/${s.no}`;
+      slide.appendChild(o);
+    } else {
+      slide.classList.add("empty");
     }
+    // 위 띠(후크) · 아래 띠(자막) — 장면이 있든 없든 늘 얹는다
+    const fixed = (S.proj?.script || {}).hook_fixed || {};
+    const h1 = s.hook_line1 || fixed.line1 || "";
+    const h2 = s.hook_line2 || fixed.line2 || "";
+    if (h1 || h2) {
+      const band = el("div", "sl-hook");
+      if (h1) band.appendChild(el("div", "l1", h1));
+      if (h2) band.appendChild(el("div", "l2", h2));
+      slide.appendChild(band);
+    }
+    if (s.srt_text) slide.appendChild(el("div", "sl-cap", s.srt_text));
+    if (!art) slide.appendChild(el("span", "sl-tag", "장면 전"));
+
+    /* ② 씬 번호·역할 */
+    const meta = el("div", "smeta");
+    meta.appendChild(el("span", "no", String(s.no)));
+    meta.appendChild(el("span", "role", s.role || "body"));
     if (showVerify) {
-      // 씬 하나만 담아 부른다 — 같은 함수, 같은 프롬프트다. 전체 검증이 놓친 것을
-      // 사람이 의심할 때 쓰는 4단계다.
       const vb = el("button", "btn sm", "\u{1F50E} 검토");
       vb.type = "button";
       vb.disabled = ro;
       vb.onclick = async () => {
-        vb.disabled = true; vb.textContent = "검토 중\u2026";
+        vb.disabled = true; vb.textContent = "검토 중…";
         try {
-          await post(`/api/projects/${encodeURIComponent(S.slug)}/verify`, { only: [s.no] });
-          await loadProject(S.slug);
-          render();
+          await post(`/api/projects/${enc}/verify`, { only: [s.no] });
+          await loadProject(S.slug); render();
         } catch (e) {
           alert(e.message); vb.disabled = false; vb.textContent = "\u{1F50E} 검토";
         }
       };
-      h.appendChild(vb);
+      meta.appendChild(vb);
     }
-    box.appendChild(h);
 
-    const g = el("div", "scene-grid");
-    const field = (label, key, value, rows) => {
-      g.appendChild(el("label", null, label));
+    const field = (key, value, rows) => {
       const t = document.createElement("textarea");
-      t.rows = rows || 2;
+      t.rows = rows || 3;
       t.value = value || "";
       t.disabled = ro;
       t.oninput = () => { (edits[s.no] = edits[s.no] || {})[key] = t.value; };
-      g.appendChild(t);
+      return t;
     };
 
-    g.appendChild(el("label", null, "후크 (2줄)"));
+    /* ③ 자막 = 음성이 읽는 글 · ④ 발음 = 규칙이 바꾼 글자 */
+    const cap = el("div", "scell");
     const hp = el("div", "hookpair");
     [["hook_line1", s.hook_line1], ["hook_line2", s.hook_line2]].forEach(([k, v]) => {
       const i = Object.assign(document.createElement("input"),
-        { type: "text", value: v || "", maxLength: 12 });
+        { type: "text", value: v || "", maxLength: 12, placeholder: "후크 12자" });
       i.disabled = ro;
       i.oninput = () => { (edits[s.no] = edits[s.no] || {})[k] = i.value; };
       hp.appendChild(i);
     });
-    g.appendChild(hp);
+    cap.appendChild(hp);
+    cap.appendChild(field("srt_text", s.srt_text, 3));
+    if (showSource && s.source) cap.appendChild(el("div", "scene-src", s.source));
 
-    field("자막 (= 말)", "srt_text", s.srt_text, 2);
-    if (showNarration) {
-      field(`발음 (${s.narration_from || "규칙"})`, "narration_text", s.narration_text, 2);
+    const nar = showNarration ? el("div", "scell") : null;
+    if (nar) {
+      nar.appendChild(el("div", "hint", `규칙: ${s.narration_from || "자동"}`));
+      nar.appendChild(field("narration_text", s.narration_text, 3));
     }
-    if (showSource && s.source) {
-      g.appendChild(el("label", null, "원문 근거"));
-      g.appendChild(el("div", "scene-src", s.source));
+
+    /* ⑤ 소리 — 길이·미리듣기·이 씬만 굽기 */
+    const snd = el("div", "scell snd");
+    snd.appendChild(el("span", "pill" + (s.audio_sec ? " ok" : ""),
+      s.audio_sec ? `${s.audio_sec.toFixed(1)}초` : "소리 없음"));
+    if (s.audio_sec) {
+      const play = el("button", "btn sm", "▶ 듣기");
+      play.type = "button";
+      play.onclick = () => new Audio(`/api/projects/${enc}/audio/${s.no}`).play();
+      snd.appendChild(play);
     }
-    box.appendChild(g);
+    // ★ 씬 하나만 다시 굽는다. 스물두 씬을 통째로 굽지 않아도 되는 이유는
+    //   s3_tts 가 처음부터 `only` 를 받게 되어 있었기 때문이다.
+    const bake = el("button", "btn sm", "굽기");
+    bake.type = "button";
+    bake.disabled = ro || (S.job && S.job.status === "running");
+    bake.title = "이 씬의 음성만 다시 만듭니다.";
+    bake.onclick = () => runStage("tts", { only: [s.no], force: true });
+    snd.appendChild(bake);
+
+    // 장면 제작 화면에서만 — 여기서 아끼는 것이 아스트라 한도를 아끼는 것이다
+    if (showArt) {
+      const one = el("button", "btn sm money", "장면");
+      one.type = "button";
+      one.disabled = ro || (S.job && S.job.status === "running");
+      one.title = "이 씬의 장면만 아스트라에게 다시 받습니다 (약 2분 30초).";
+      one.onclick = () => runStage("art", { only: [s.no], force: true });
+      snd.appendChild(one);
+    }
+
+    rowEl.append(slide, meta, cap);
+    if (nar) rowEl.appendChild(nar);
+    rowEl.appendChild(snd);
+    wrap.appendChild(rowEl);
+
     const v = (d.verify || {})[String(s.no)];
-    if (showVerify && v) box.appendChild(verifyBox(s.no, v));
-    c.appendChild(box);
+    if (showVerify && v) wrap.appendChild(verifyBox(s.no, v));
+    c.appendChild(wrap);
   });
 
   const save = el("button", "btn primary", "저장");
@@ -444,10 +474,10 @@ function sceneEditor(d, { showSource, showNarration, showVerify } = {}) {
     if (!Object.keys(edits).length) { alert("고친 것이 없습니다."); return; }
     save.disabled = true;
     try {
-      const r = await put(`/api/projects/${encodeURIComponent(S.slug)}/scenes`,
-        { scenes: edits });
+      const r = await put(`/api/projects/${enc}/scenes`, { scenes: edits });
       await loadProject(S.slug);
-      alert(`씬 ${r.touched.join(", ")} 저장됨. 「음성」 탭을 다시 돌리면 그 씬만 다시 굽습니다.`);
+      render();
+      alert(`씬 ${r.touched.join(", ")} 저장됨. 발음을 고쳤으면 그 씬의 「굽기」를 누르세요.`);
     } catch (e) { alert(e.message); } finally { save.disabled = false; }
   };
   c.appendChild(row(save));
@@ -721,8 +751,37 @@ PAGES.plan = async (m) => {
     m.appendChild(c);
   }
 
+
+/* ══ 스토리보드 — 대본이 씬으로 서는 자리 ═════════════════════════════
+   ★ 대본 화면에서 갈라냈다. 앞은 「글을 만드는 일」이고 여기는 「그 글을 씬으로
+     세우는 일」이다. 한 면에 다 두면 대본을 뽑으러 들어와서 음성·자막까지
+     스크롤로 지나가게 된다.
+
+   ★ **씬 하나가 한 줄이다.** 슬라이드·자막·발음·소리가 가로로 서서, 자막과
+     발음이 서로 맞는지 눈이 위아래로 안 뛴다. */
+PAGES.storyboard = async (m) => {
+  const p = S.proj, d = p.script || {};
+  const enc = encodeURIComponent(S.slug);
+  const stt = (k) => (stageOf(k) || {}).state || "";
+
+  m.appendChild(head("스토리보드",
+    "씬마다 자막·발음·소리를 맞추고 장면 지시까지. 슬라이드 칸은 「장면 제작」에서 채워집니다."));
+
+  if (!d.scenes || !d.scenes.length) {
+    m.appendChild(card("아직 대본이 없습니다",
+      "「대본」에서 대본을 먼저 뽑으세요 — 씬이 있어야 스토리보드가 섭니다."));
+    return;
+  }
+
+  m.appendChild(jumpBar([
+    ["sec-scenes", `씬 ${d.scenes.length}`, stt("script")],
+    ["sec-speech", "발음", stt("speech")],
+    ["sec-tts", "음성", stt("tts")],
+    ["sec-subs", "자막", stt("subs")],
+    ["sec-artspec", "장면 지시", stt("artspec")],
+  ]));
+
   /* ── 5 · 씬 — 자막·발음·판정을 한자리에서 ────────────────────────── */
-  if (d.scenes && d.scenes.length) {
     const rc = card("다듬기",
       "대본을 새로 쓰지 않고 손질만 합니다. 검증은 고치지 않고 대안만 냅니다.");
     rc.id = "sec-scenes";
@@ -881,29 +940,18 @@ PAGES.art = (m) => {
   };
   c.appendChild(row(runBtn("art", "장면 받기"), f, ph));
 
-  const art = p.art || {};
-  const strip = el("div", "row");
-  (p.script?.scenes || []).forEach((s) => {
-    const name = art[s.no];
-    const cell = el("div", "artcell");
-    const t = el("div", "thumb");
-    if (name) {
-      t.style.backgroundImage =
-        `url('/api/projects/${encodeURIComponent(S.slug)}/art/${s.no}?t=${Date.now()}')`;
-    }
-    cell.appendChild(t);
-    cell.appendChild(el("div", "artlabel",
-      name ? (/\.svg$/i.test(name) ? `씬 ${s.no} · 움직임` : `씬 ${s.no} · 정지`)
-        : `씬 ${s.no} · 없음`));
-    const one = el("button", "btn sm money", "이 씬만");
-    one.type = "button";
-    one.disabled = !!S.cfg?.readonly;
-    one.onclick = () => runStage("art", { only: [s.no], force: true });
-    cell.appendChild(one);
-    strip.appendChild(cell);
-  });
-  c.appendChild(strip);
   m.appendChild(c);
+
+  /* ★ 여기가 **스토리보드가 채워지는 것을 보는 자리**다. 슬라이드가 하나씩 그려지는
+   *   동안 그 옆의 자막·발음·소리를 같이 본다 — 장면이 자막과 어긋나면 여기서 보인다.
+   *   씬 표는 스토리보드와 **같은 부품**이다. 두 벌을 두면 한쪽만 고쳐지고,
+   *   그때 화면이 거짓말을 한다. */
+  const d = p.script || {};
+  if (d.scenes && d.scenes.length) {
+    m.appendChild(sceneEditor(d, { showNarration: true, showVerify: true, showArt: true }));
+  } else {
+    m.appendChild(card("씬", "아직 대본이 없습니다. 「대본」에서 먼저 뽑으세요."));
+  }
 };
 
 /* 컴포지션 — **굽기 전에 화면을 보고 승인하는 자리** */
