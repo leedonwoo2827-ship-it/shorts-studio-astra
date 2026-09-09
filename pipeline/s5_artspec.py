@@ -54,9 +54,12 @@ def band_note(width: int, height: int, top: int, bottom: int, ivory: str) -> str
 #   정지한 화면 위로 마무리 말이 얹힌다 — 사용자가 정한 마무리 모양이다.
 CLOSE_MOTION_RATIO = 0.6
 
-# 그림칸 비율 — `s7_compose.ART_RATIO` 와 **같은 값이어야 한다.**
-# 다르면 두루마리 칸이 카메라 걸음과 안 맞아 첫 칸·마지막 칸이 잘린다.
-ART_RATIO = 3 / 2
+# 그림칸 비율 — **`core.config.art_ratio` 한 곳에서 받는다.**
+# 예전에는 이 파일과 `s7_compose` 가 각자 `3/2` 를 들고 있었고 「같은 값이어야
+# 한다」는 주석만 있었다. 어긋나면 두루마리 칸이 카메라 걸음과 안 맞아 첫 칸·
+# 마지막 칸이 잘리는데 **오류도 경고도 안 났다.** 이제 어긋날 수가 없다.
+# 이 파일은 두루마리 기하를 알려 주는 자리이므로 언제나 두루마리 비율이다.
+ART_RATIO = config.art_ratio(config.LAYOUT_SCROLL)
 
 _LOOPY = ("주기", "반복", "왕복", "흔들", "깜빡", "진동", "오간다", "오가며",
           "되돌아", "되풀이", "번갈아", "커졌다", "작아졌다", "눌렸다",
@@ -248,7 +251,17 @@ def run(slug: str, *, on_activity: Optional[Callable[[str], None]] = None
         return "\n".join(rows)
 
     scene_list = "\n".join(line(s) for s in scenes)
-    user = prompts.render("artspec", style_hint=img.get("style_hint", ""),
+    # ★ **배치가 프롬프트를 고른다.** 두 프롬프트는 스키마가 같고(ARTSPEC_SCHEMA)
+    #   금지 목록과 `cells[].what` 의 쓰기 규칙만 다르다.
+    #     두루마리  다음 단계가 아스트라다 — `<path>` 를 손으로 치니 사람·얼굴·
+    #               글자를 금지하고, `what` 은 한글 장면 묘사다.
+    #     카드      다음 단계가 사람 + FlowGenie 다 — 사람도 원경도 되고,
+    #               `what` 은 **영어 이미지 프롬프트**다(그대로 넘어간다).
+    #   `prompts.fingerprint()` 가 프롬프트 변경을 단계 무효화로 잡으므로,
+    #   배치를 갈아 쓰면 그 프로젝트의 장면 지시가 낡음으로 뜬다.
+    which = ("artspec_card" if config.layout() == config.LAYOUT_CARD
+             else "artspec")
+    user = prompts.render(which, style_hint=img.get("style_hint", ""),
                           ivory=ivory, sec=fallback, scene_list=scene_list)
 
     out, cost = structured("artspec", SYSTEM, user, ARTSPEC_SCHEMA,

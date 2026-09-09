@@ -25,6 +25,7 @@ from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
 from fastapi.staticfiles import StaticFiles
 
 from core import access, config, console, paths, persona
+from tools import flowgenie
 from core.atomic_io import atomic_write_json, atomic_write_text
 from core.jobs import get_registry
 from pipeline import runner, s1b_revise, s2_speech, s4_subs, stages
@@ -128,6 +129,9 @@ def create_app() -> FastAPI:
                     if k in ("size", "reserve_top_pct", "reserve_bottom_pct")},
                 "tts": {"engine": (c.get("tts") or {}).get("engine")},
                 "budget_chars": config.budget_chars(),
+                # 배치 — 화면이 뜨자마자 알아야 한다. 프로젝트를 열기 전에도
+                # 연결 칩이 「ChatGPT 없어도 됩니다」를 말할 수 있어야 한다.
+                "layout": config.layout(),
                 "lan": access.lan_enabled(),
                 "readonly": guest,
                 "readonly_why": access.DENY_MESSAGE if guest else ""}
@@ -175,6 +179,31 @@ def create_app() -> FastAPI:
         }, indent=2)
         return {"slug": slug, "file": name}
 
+    def _frames_map(slug: str) -> Dict[str, List[int]]:
+        """`{"2": [0, 1, 3]}` — 씬 2 는 대표(0)와 조각 1·3 이 찍혔다."""
+        d = paths.comp_dir(slug) / "frames"
+        if not d.is_dir():
+            return {}
+        out: Dict[str, List[int]] = {}
+        for f in d.glob("*.png"):
+            head, _, tail = f.stem.partition("-")
+            if not head.isdigit():
+                continue
+            m = int(tail) if tail.isdigit() else 0
+            out.setdefault(str(int(head)), []).append(m)
+        return {k: sorted(v) for k, v in out.items()}
+
+    def _art_stamp(slug: str) -> int:
+        """장면 폴더에서 가장 최근에 바뀐 시각(정수 초). 캐시 깨는 데만 쓴다."""
+        d = paths.art_dir(slug)
+        if not d.is_dir():
+            return 0
+        try:
+            return int(max((f.stat().st_mtime for f in d.iterdir() if f.is_file()),
+                           default=0))
+        except OSError:
+            return 0
+
     @app.get("/api/projects/{slug}")
     def get_project(slug: str) -> Dict[str, Any]:
         _need(slug)
@@ -204,11 +233,18 @@ def create_app() -> FastAPI:
                                  .read_text(encoding="utf-8"))
                       if (paths.plan_dir(slug) / "원고.json").exists() else None),
             "art": runner.s6_art.present(slug),
-            # 최종 화면이 찍힌 씬들 — 스토리보드가 이것을 슬라이드로 쓴다
-            "frames": sorted(int(f.stem) for f in
-                             (paths.comp_dir(slug) / "frames").glob("*.png")
-                             if f.stem.isdigit())
-            if (paths.comp_dir(slug) / "frames").is_dir() else [],
+            # 카드 배치 — 씬마다 **조각 목록**. 씬에 그림이 몇 장인지 정해져
+            # 있지 않으므로 화면이 이것으로 띠를 그린다.
+            "art_many": runner.s6_art.present_many(slug),
+            "layout": config.layout(),
+            # 최종 화면 — `{씬: [조각…]}`. 씬 대표 한 장은 조각 목록에 `0` 으로
+            # 담는다. 예전에는 씬 번호 배열이었는데, 카드 배치는 조각마다 찍으므로
+            # 「어느 조각이 찍혔나」를 알려 줘야 한다.
+            "frames": _frames_map(slug),
+            # ★ 캐시 깨는 도장. 예전에 화면이 `p.stamp` 를 쓰고 있었는데 서버가
+            #   그 칸을 **주지 않아서**, 반입한 그림을 바꿔 넣어도 옛 그림이
+            #   그대로 보였다(브라우저 캐시). 이제 실제로 준다.
+            "stamp": _art_stamp(slug),
             "build": ({"name": build.name,
                        "youtube": (build / "유튜브.txt").read_text(encoding="utf-8")
                        if (build / "유튜브.txt").exists() else "",
@@ -419,17 +455,22 @@ def create_app() -> FastAPI:
         # 딸린 파일을 먼저 치운다 — 번호를 당기기 전이라 옛 번호로 찾을 수 있다.
         import os
         removed: List[str] = []
-        for d, pat in ((paths.audio_dir(slug), "{n:03d}.wav"),
-                       (paths.art_dir(slug), None)):
+        # ★ **꼬리 붙은 이름까지 잡아야 한다.** 카드 배치의 그림은 `001-2.png`,
+        #   `001-2-03.png` 처럼 조각·프레임 번호가 붙는다. `001.*` 만 글롭하면
+        #   그 파일들이 **남아서 새 1번 씬에 옛 그림이 붙는다** — 음성이 한 칸
+        #   밀리는 것과 같은, 조용히 틀리는 사고다. 로고 폴더도 같이 본다.
+        def art_files(d: Path, n: int) -> List[Path]:
             if not d.is_dir():
-                continue
-            if pat:
-                f = d / pat.format(n=gone)
-                if f.exists():
-                    f.unlink(); removed.append(f.name)
-            else:
-                for f in list(d.glob(f"{gone:03d}.*")):
-                    f.unlink(); removed.append(f.name)
+                return []
+            return sorted(set(d.glob(f"{n:03d}.*")) | set(d.glob(f"{n:03d}-*")))
+
+        art_dirs = [paths.art_dir(slug), paths.art_dir(slug) / "_아이콘"]
+        f = paths.audio_dir(slug) / f"{gone:03d}.wav"
+        if f.exists():
+            f.unlink(); removed.append(f.name)
+        for d in art_dirs:
+            for f in art_files(d, gone):
+                f.unlink(); removed.append(f.name)
 
         # 뒤 번호를 한 칸씩 당긴다. **작은 번호부터** 옮겨야 덮어쓰지 않는다.
         for x in kept:
@@ -437,14 +478,15 @@ def create_app() -> FastAPI:
             if old_no <= gone:
                 continue
             new_no = old_no - 1
-            for d, ext in ((paths.audio_dir(slug), ".wav"), (paths.art_dir(slug), None)):
-                if not d.is_dir():
-                    continue
-                srcs = ([d / f"{old_no:03d}{ext}"] if ext
-                        else list(d.glob(f"{old_no:03d}.*")))
-                for f in srcs:
-                    if f.exists():
-                        os.replace(f, d / f"{new_no:03d}{f.suffix}")
+            w = paths.audio_dir(slug) / f"{old_no:03d}.wav"
+            if w.exists():
+                os.replace(w, paths.audio_dir(slug) / f"{new_no:03d}.wav")
+            # ★ 이름의 **앞 세 자리만** 갈고 꼬리는 그대로 둔다 —
+            #   `005-2-03.png` → `004-2-03.png`. 확장자만 붙여 다시 만들면
+            #   조각·프레임 번호가 날아가 한 씬의 그림이 전부 한 장으로 뭉친다.
+            for d in art_dirs:
+                for f in art_files(d, old_no):
+                    os.replace(f, d / f"{new_no:03d}{f.name[3:]}")
             x["no"] = new_no
 
         doc["scenes"] = kept
@@ -505,21 +547,47 @@ def create_app() -> FastAPI:
           자막이 그림을 가리는지가 안 보인다 — 굽고 나서야 알게 된다.
         ★ 컴포지션을 굽기 전에는 없다. 그때는 화면이 장면 SVG 로 물러선다.
         """
+        return _frame_file(slug, no, 0)
+
+    @app.get("/api/projects/{slug}/frame/{no}/{m}")
+    def get_frame_shot(slug: str, no: int, m: int) -> FileResponse:
+        """씬 `no` 의 **조각 `m`** 최종 화면. 카드 배치는 조각마다 그림이 갈리므로
+        씬 대표 한 장만으로는 나머지 그림을 사람이 볼 수 없다."""
+        return _frame_file(slug, no, m)
+
+    def _frame_file(slug: str, no: int, m: int) -> FileResponse:
         _need(slug)
-        p = paths.comp_dir(slug) / "frames" / f"{int(no):03d}.png"
+        stem = f"{int(no):03d}" + (f"-{int(m)}" if m else "")
+        p = paths.comp_dir(slug) / "frames" / f"{stem}.png"
         if not p.exists():
             raise HTTPException(404, "아직 최종 화면이 없습니다 — 「컴포지션 굽기」를 먼저.")
         return FileResponse(p, media_type="image/png")
 
+    _MEDIA_TYPE = {".svg": "image/svg+xml", ".png": "image/png",
+                   ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                   ".webp": "image/webp", ".mp4": "video/mp4",
+                   ".webm": "video/webm"}
+
     @app.get("/api/projects/{slug}/art/{no}")
-    def get_art(slug: str, no: int) -> FileResponse:
-        """씬 장면 하나. `.svg` 면 브라우저가 그대로 움직여 준다."""
+    def get_art(slug: str, no: int, m: int = 0, k: int = 0) -> FileResponse:
+        """씬 장면 하나. `.svg` 면 브라우저가 그대로 움직여 준다.
+
+        `?m=2&k=3` 을 주면 **조각 2 의 프레임 3** 을 준다(카드 배치).
+        안 주면 예전처럼 씬 대표 한 장이다 — 두루마리 화면이 그 길로 계속 돈다.
+        """
         _need(slug)
-        name = runner.s6_art.present(slug).get(int(no))
+        if m:
+            cues = runner.s6_art.present_many(slug).get(int(no)) or []
+            hit = next((c for c in cues if int(c.get("m") or 0) == int(m)), None)
+            frames = (hit or {}).get("frames") or []
+            idx = max(1, int(k or 1))
+            name = frames[idx - 1] if idx <= len(frames) else None
+        else:
+            name = runner.s6_art.present(slug).get(int(no))
         if not name:
             raise HTTPException(404, "그 씬 장면이 아직 없습니다.")
         p = paths.art_dir(slug) / name
-        media = "image/svg+xml" if p.suffix.lower() == ".svg" else None
+        media = _MEDIA_TYPE.get(p.suffix.lower())
         return FileResponse(p, media_type=media) if media else FileResponse(p)
 
     @app.get("/api/projects/{slug}/preview/{path:path}")
@@ -746,6 +814,26 @@ def create_app() -> FastAPI:
         else:
             subprocess.Popen(["xdg-open", str(target)])
         return {"opened": str(target)}
+
+    @app.post("/api/projects/{slug}/flowgenie/export")
+    def flowgenie_export(slug: str) -> Dict[str, Any]:
+        """`04_장면/_반입/flowgenie.json` 을 쓴다. 크레딧 0.
+
+        사람이 할 일: 이 JSON 을 FlowGenie 사이드패널에 넣고 **16:9** 로 돌린 뒤,
+        내려온 PNG 를 반입 폴더에 넣고 「가져오기」를 누른다.
+        """
+        _need(slug)
+        log: List[str] = []
+        r = flowgenie.export(slug, on_log=log.append)
+        return {**r, "log": "\n".join(log)}
+
+    @app.post("/api/projects/{slug}/flowgenie/import")
+    def flowgenie_import(slug: str) -> Dict[str, Any]:
+        """반입 폴더(와 다운로드 폴더)에서 그림을 `04_장면/` 으로 올린다."""
+        _need(slug)
+        log: List[str] = []
+        r = flowgenie.bring_in(slug, on_log=log.append)
+        return {**r, "log": "\n".join(log)}
 
     @app.post("/api/projects/{slug}/placeholder")
     def make_placeholder(slug: str) -> Dict[str, Any]:
