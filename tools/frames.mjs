@@ -10,6 +10,15 @@
  *
  * ★ 컴포지션이 있어야 돈다. 없으면 조용히 아무것도 안 만들고 끝낸다 —
  *   슬라이드는 그때 예전처럼 SVG 로 떨어진다.
+ *
+ * ★ **카드 배치는 조각마다 찍는다** (`장면시각.json` 의 `scenes[].shots`).
+ *   씬 한가운데 한 장만 찍으면, 그림이 세 장 갈리는 씬에서 **가운데 것 하나만**
+ *   찍히고 나머지는 사람이 못 본다 — 몇 장이 비었는지 볼 수 없다는 뜻이다.
+ *      frames/002.png      씬 2 한가운데 (두루마리 · 그리고 카드의 대표 한 장)
+ *      frames/002-1.png    씬 2 조각 1
+ *      frames/002-3.png    씬 2 조각 3
+ *   ★ **플립북은 프레임마다 찍지 않는다.** 조각당 한 장(넘김이 끝나 멈춘 자리)만
+ *     찍는다. 12프레임을 12장 찍으면 스토리보드 띠가 터진다.
  */
 import puppeteer from "puppeteer";
 import { mkdirSync, readFileSync, existsSync } from "node:fs";
@@ -54,17 +63,32 @@ await page.setViewport({ width: 1080, height: 1920, deviceScaleFactor: W / 1080 
 await page.goto("file:///" + html.replace(/\\/g, "/"), { waitUntil: "networkidle0" });
 await new Promise((r) => setTimeout(r, 800));
 
-for (const s of shots) {
-  // 씬 **한가운데** 를 찍는다. 시작 순간은 페이드가 덜 끝나 흐리다.
-  const t = Number(s.start) + Number(s.dur) / 2;
+const seek = async (t) => {
   await page.evaluate((tt) => {
     const tl = window.__timelines && window.__timelines.main;
     if (tl) { tl.pause(); tl.time(tt); }
   }, t);
   await new Promise((r) => setTimeout(r, 260));
-  const file = join(resolve(out), String(s.no).padStart(3, "0") + ".png");
-  await page.screenshot({ path: file });
-  console.log(`[frame] ${s.no} ${t.toFixed(2)}s`);
+};
+const nn = (n) => String(n).padStart(3, "0");
+
+for (const s of shots) {
+  // 씬 **한가운데** — 두루마리에서는 이것이 그 씬의 화면이고, 카드에서도
+  // 스토리보드가 접혀 있을 때 보여 줄 대표 한 장이다.
+  const mid = Number(s.start) + Number(s.dur) / 2;
+  await seek(mid);
+  await page.screenshot({ path: join(resolve(out), nn(s.no) + ".png") });
+  console.log(`[frame] ${s.no} ${mid.toFixed(2)}s`);
+
+  // 조각마다 한 장. `hold` 는 플립북이 마지막 프레임에서 멈추는 시각이다 —
+  // 넘김이 끝난 뒤를 찍어야 「무엇으로 멈췄는지」가 보인다.
+  for (const sh of s.shots || []) {
+    const t = Math.min(Number(sh.hold ?? sh.at) + 0.35,
+                       Number(s.start) + Number(s.dur) - 0.05);
+    await seek(t);
+    await page.screenshot({ path: join(resolve(out), `${nn(s.no)}-${sh.m}.png`) });
+    console.log(`[frame] ${s.no}-${sh.m} ${t.toFixed(2)}s (프레임 ${sh.frames}장)`);
+  }
 }
 
 await browser.close();

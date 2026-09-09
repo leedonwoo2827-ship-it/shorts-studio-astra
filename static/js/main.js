@@ -30,6 +30,10 @@ const S = {
   job: null,         // 도는 잡
   poll: null,        // setInterval 핸들
   cfg: null,
+  // ★ FlowGenie 결과 로그를 **상태에 담는다.** 단추가 끝나면 `loadProject` 가
+  //   화면을 다시 그리는데, 로그를 DOM 에만 써 두면 그때 통째로 사라진다 —
+  //   눌렀는데 아무 일도 안 일어난 것처럼 보인다(실측).
+  fgLog: "",
 };
 
 async function api(path, opts) {
@@ -385,6 +389,94 @@ function verifyBox(no, v) {
  * ★ **사람 손이 이긴다.** 고친 값은 script.json 에 바로 들어가고 서버가 자막 큐를
  *   다시 나눈다. 발음을 고친 씬은 음성 스탬프가 어긋나 그 씬만 다시 굽는다.
  */
+/** 이 씬에 늘어놓을 조각 목록. 카드 배치는 조각마다, 두루마리는 씬당 하나.
+ *  `frames` 는 서버가 `{씬: [조각…]}` 로 준다 — `0` 은 씬 대표 한 장이다. */
+function sceneShots(s) {
+  const many = (S.proj?.art_many || {})[String(s.no)] || [];
+  const fr = (S.proj?.frames || {})[String(s.no)] || [];
+  const card = (S.proj?.layout || "카드") === "카드";
+  if (!card) return [{ m: 0, frames: 0, hasFrame: fr.includes(0) }];
+  // ★ 조각 수는 **자막 조각**이 정한다 — 컴포지션이 그것으로 겹을 만든다.
+  //   그림이 없는 조각도 칸을 지켜야 「몇 장이 비었나」가 보인다.
+  const n = Math.max((s.cues || []).length, 1);
+  const out = [];
+  for (let m = 1; m <= n; m++) {
+    const hit = many.find((x) => Number(x.m) === m);
+    out.push({ m, frames: hit ? (hit.frames || []).length : 0,
+               hasFrame: fr.includes(m), cue: (s.cues || [])[m - 1] });
+  }
+  // ★ 조각보다 뒤에 붙은 그림은 **화면에 안 나온다.** 정상 칸처럼 보여 주면
+  //   「넣었는데 안 보인다」를 겪는다 — 안 나온다고 적어 준다. 자막을 줄여
+  //   조각이 줄었을 때 실제로 생긴다.
+  for (const x of many) {
+    if (Number(x.m) > n) {
+      out.push({ m: Number(x.m), frames: (x.frames || []).length,
+                 hasFrame: false, orphan: true });
+    }
+  }
+  return out;
+}
+
+/** 슬라이드 한 칸. 최종 화면이 있으면 그것, 없으면 그림, 없으면 빈 칸. */
+function slideCell(s, sh, enc) {
+  const cell = el("div", "slide");
+  // ★ 캐시 깨는 도장. 서버가 `stamp`(장면 폴더 최근 수정 시각)를 준다 —
+  //   예전에는 이 칸을 화면이 쓰는데 서버가 주지 않아서, 그림을 바꿔 넣어도
+  //   **옛 그림이 그대로 보였다.**
+  const v = S.proj?.stamp || "";
+  const art = (S.proj?.art || {})[String(s.no)] || (S.proj?.art || {})[s.no];
+  if (sh.hasFrame) {
+    const im = document.createElement("img");
+    im.src = sh.m
+      ? `/api/projects/${enc}/frame/${s.no}/${sh.m}?v=${v}`
+      : `/api/projects/${enc}/frame/${s.no}?v=${v}`;
+    im.alt = `씬 ${s.no}${sh.m ? " 조각 " + sh.m : ""} 최종 화면`;
+    im.loading = "lazy";
+    cell.appendChild(im);
+    cell.classList.add("final");
+  } else if (sh.frames > 0) {
+    const im = document.createElement("img");
+    im.src = `/api/projects/${enc}/art/${s.no}?m=${sh.m}&k=1&v=${v}`;
+    im.alt = `씬 ${s.no} 조각 ${sh.m}`;
+    im.loading = "lazy";
+    cell.appendChild(im);
+  } else if (!sh.m && art) {
+    const o = document.createElement("object");
+    o.type = String(art).toLowerCase().endsWith(".svg") ? "image/svg+xml" : "";
+    o.data = `/api/projects/${enc}/art/${s.no}?v=${v}`;
+    cell.appendChild(o);
+  } else {
+    cell.classList.add("empty");
+  }
+
+  // 프레임이 여럿이면 플립북이다 — 장수를 배지로 알려 준다. 프레임마다 한 칸을
+  // 만들면 열두 장짜리 조각에서 띠가 터진다.
+  if (sh.frames > 1) cell.appendChild(el("span", "sl-fr", `×${sh.frames}`));
+  if (sh.m) cell.appendChild(el("span", "sl-m", String(sh.m)));
+  if (sh.orphan) {
+    cell.classList.add("orphan");
+    cell.appendChild(el("span", "sl-out", "안 나옴"));
+    return cell;                       // 후크·자막을 얹지 않는다 — 화면이 아니다
+  }
+
+  if (!sh.hasFrame) {
+    // 최종 화면 전에는 후크·자막을 얹어 축소판 노릇을 하게 한다.
+    const fixed = (S.proj?.script || {}).hook_fixed || {};
+    const h1 = s.card_title || s.hook_line1 || fixed.line1 || "";
+    const h2 = s.card_badge || s.hook_line2 || fixed.line2 || "";
+    if (h1 || h2) {
+      const band = el("div", "sl-hook");
+      if (h1) band.appendChild(el("div", "l1", h1));
+      if (h2) band.appendChild(el("div", "l2", h2));
+      cell.appendChild(band);
+    }
+    const cap = sh.cue ? sh.cue.text : s.srt_text;
+    if (cap) cell.appendChild(el("div", "sl-cap", cap));
+    if (!sh.frames && !art) cell.appendChild(el("span", "sl-tag", "장면 전"));
+  }
+  return cell;
+}
+
 function sceneEditor(d, { showSource, showNarration, showVerify, showArt } = {}) {
   const ro = !!S.cfg?.readonly;
   const enc = encodeURIComponent(S.slug);
@@ -394,8 +486,8 @@ function sceneEditor(d, { showSource, showNarration, showVerify, showArt } = {})
   const edits = {};
 
   const headRow = el("div", "srow shead");
-  ["", "씬", "자막 (= 말)", showNarration ? "발음 (읽는 글자)" : "", "소리", ""]
-    .forEach((t, i) => { if (i !== 3 || showNarration) headRow.appendChild(el("div", null, t)); });
+  ["씬", "자막 (= 말)", showNarration ? "발음 (읽는 글자)" : "", "소리", ""]
+    .forEach((t, i) => { if (i !== 2 || showNarration) headRow.appendChild(el("div", null, t)); });
   c.appendChild(headRow);
 
   (d.scenes || []).forEach((s) => {
@@ -406,39 +498,17 @@ function sceneEditor(d, { showSource, showNarration, showVerify, showArt } = {})
      *   장면이 아직 없을 때도 후크와 자막을 얹어 두면, 그 칸이 곧 완성 화면의
      *   축소판이 된다. 글자가 띠 밖으로 넘치는지, 후크가 잘리는지가 여기서 보인다.
      *   실제 화면도 「장면에는 글자가 없고 글자는 전부 위에 얹는 층」이라 같은 모양이다. */
-    const slide = el("div", "slide");
-    /* ★ **최종 화면이 있으면 그것을 쓴다.** 장면 SVG 만 얹으면 글자가 띠를 넘치는지,
-     *   자막이 그림을 가리는지가 안 보인다 — 굽고 나서야 알게 된다.
-     *   컴포지션을 굽기 전에는 없으므로 그때는 SVG 로 물러선다. */
-    const hasFrame = (S.proj?.frames || []).includes(s.no);
-    const art = (S.proj?.art || {})[String(s.no)] || (S.proj?.art || {})[s.no];
-    if (hasFrame) {
-      const im = document.createElement("img");
-      im.src = `/api/projects/${enc}/frame/${s.no}`;
-      im.alt = `씬 ${s.no} 최종 화면`;
-      im.loading = "lazy";
-      slide.appendChild(im);
-      slide.classList.add("final");
-    } else if (art) {
-      const o = document.createElement("object");
-      o.type = String(art).toLowerCase().endsWith(".svg") ? "image/svg+xml" : "";
-      o.data = `/api/projects/${enc}/art/${s.no}`;
-      slide.appendChild(o);
-    } else {
-      slide.classList.add("empty");
-    }
-    // 위 띠(후크) · 아래 띠(자막) — 장면이 있든 없든 늘 얹는다
-    const fixed = hasFrame ? {} : ((S.proj?.script || {}).hook_fixed || {});
-    const h1 = s.hook_line1 || fixed.line1 || "";
-    const h2 = s.hook_line2 || fixed.line2 || "";
-    if (h1 || h2) {
-      const band = el("div", "sl-hook");
-      if (h1) band.appendChild(el("div", "l1", h1));
-      if (h2) band.appendChild(el("div", "l2", h2));
-      slide.appendChild(band);
-    }
-    if (s.srt_text && !hasFrame) slide.appendChild(el("div", "sl-cap", s.srt_text));
-    if (!art && !hasFrame) slide.appendChild(el("span", "sl-tag", "장면 전"));
+    /* ★ **씬 한 행에 그림이 한 장이 아니다.** 카드 배치는 자막 조각마다 그림이
+     *   갈리고, 한 조각 안에서 PNG 여러 장이 GIF 처럼 넘어갈 수도 있다.
+     *   그래서 칸을 **가로 띠**로 만들고 조각마다 한 장을 늘어놓는다.
+     *   예전에는 씬당 한 장이었고, 그림이 셋인 씬에서 **가운데 것 하나만**
+     *   보였다 — 몇 장이 비었는지 볼 수 없다는 뜻이었다. */
+    const strip = el("div", "slidestrip");
+    const shots = sceneShots(s);
+    for (const sh of shots) strip.appendChild(slideCell(s, sh, enc));
+    // ★ 띠는 격자 첫 칸이 아니라 **줄 위에 통째로** 올린다. 조각이 넷이면
+    //   132px x 4 = 528px 이라 격자 칸에 넣으면 자막·발음 칸이 짜부라진다.
+    wrap.appendChild(strip);
 
     /* ② 씬 번호·역할 */
     const meta = el("div", "smeta");
@@ -514,7 +584,7 @@ function sceneEditor(d, { showSource, showNarration, showVerify, showArt } = {})
       snd.appendChild(one);
     }
 
-    rowEl.append(slide, meta, cap);
+    rowEl.append(meta, cap);
     if (nar) rowEl.appendChild(nar);
     rowEl.appendChild(snd);
     wrap.appendChild(rowEl);
@@ -1055,8 +1125,17 @@ PAGES.storyboard = async (m) => {
 PAGES.art = (m) => {
   const p = S.proj;
   const enc = encodeURIComponent(S.slug);
-  m.appendChild(head("장면 제작",
-    "아스트라가 씬마다 움직이는 장면을 코드로 씁니다. 씬당 약 2분 30초, 가장 비싼 자리입니다."));
+  // ★ 배치가 이 화면의 성격을 바꾼다. 카드 배치는 **아스트라를 안 부른다** —
+  //   사람이 FlowGenie 로 그려 넣고, 크레딧이 0 이다.
+  const card9 = (p.layout || "카드") === "카드";
+  m.appendChild(card9
+    ? head("장면 받기",
+        "가운데 16:9 그림을 FlowGenie 로 만들어 넣습니다. 자막 조각마다 한 장 — "
+        + "조각 하나가 컷 하나입니다. 크레딧을 쓰지 않습니다.")
+    : head("장면 제작",
+        "아스트라가 씬마다 움직이는 장면을 코드로 씁니다. 씬당 약 2분 30초, 가장 비싼 자리입니다."));
+
+  if (card9) m.appendChild(flowgenieCard());
 
   const c = card("장면",
     "지시가 바뀐 씬만 다시 받습니다. 여기서 아끼는 것이 아스트라 한도를 아끼는 것입니다.");
@@ -1077,8 +1156,10 @@ PAGES.art = (m) => {
   };
   /* ★ 위에는 **하나만** 둔다. 셋이 나란히 있으면 어느 것이 평소 길인지 안 보인다.
    *   「전부 다시」와 「자리표시」는 가끔 쓰는 것이라 현황 아래로 내렸다. */
-  c.appendChild(row(runBtn("art", "장면 받기")));
-  m.appendChild(c);
+  if (!card9) {
+    c.appendChild(row(runBtn("art", "장면 받기")));
+    m.appendChild(c);
+  }
 
   /* ★ 여기가 **스토리보드가 채워지는 것을 보는 자리**다. 슬라이드가 하나씩 그려지는
    *   동안 그 옆의 자막·발음·소리를 같이 본다 — 장면이 자막과 어긋나면 여기서 보인다.
@@ -1096,31 +1177,33 @@ PAGES.art = (m) => {
   const sc2 = card("씬", "그림이 자막과 맞는지만 봅니다. 글을 고치려면 「스토리보드」로 가세요.");
   d.scenes.forEach((s) => {
     const line = el("div", "artline");
-    const slide = el("div", "slide");
-    const name = art[s.no];
-    if (name) {
-      const o = document.createElement("object");
-      o.type = /\.svg$/i.test(name) ? "image/svg+xml" : "";
-      o.data = `/api/projects/${enc}/art/${s.no}?t=${p.stamp || ""}`;
-      slide.appendChild(o);
-    } else {
-      slide.classList.add("empty");
-      slide.appendChild(el("span", "sl-tag", "장면 전"));
-    }
+    // 스토리보드와 **같은 부품**을 쓴다. 두 벌을 두면 한쪽만 고쳐지고 그때
+    // 화면이 거짓말을 한다.
+    const shots = sceneShots(s);
+    const strip = el("div", "slidestrip");
+    for (const sh of shots) strip.appendChild(slideCell(s, sh, enc));
     const body = el("div", "scell");
+    const name = art[s.no];
+    const got = shots.filter((x) => x.frames > 0 && !x.orphan).length;
+    const want = shots.filter((x) => !x.orphan).length;
     body.appendChild(row(
       el("span", "no", String(s.no)),
       el("span", "role", s.role || "body"),
-      el("span", "pill", name ? (/\.svg$/i.test(name) ? "움직임" : "정지") : "없음"),
+      card9
+        ? el("span", "pill" + (got >= want ? " ok" : got ? " warn" : ""),
+             `그림 ${got}/${want}`)
+        : el("span", "pill", name ? (/\.svg$/i.test(name) ? "움직임" : "정지") : "없음"),
       s.audio_sec ? el("span", "pill ok", `${s.audio_sec.toFixed(1)}초`) : null,
     ));
     body.appendChild(el("div", "artcap", s.srt_text || ""));
-    const one = el("button", "btn sm money", "이 씬만 다시");
-    one.type = "button";
-    one.disabled = !!S.cfg?.readonly || (S.job && S.job.status === "running");
-    one.onclick = () => runStage("art", { only: [s.no], force: true });
-    body.appendChild(row(one));
-    line.append(slide, body);
+    if (!card9) {
+      const one = el("button", "btn sm money", "이 씬만 다시");
+      one.type = "button";
+      one.disabled = !!S.cfg?.readonly || (S.job && S.job.status === "running");
+      one.onclick = () => runStage("art", { only: [s.no], force: true });
+      body.appendChild(row(one));
+    }
+    line.append(strip, body);
     sc2.appendChild(line);
   });
   m.appendChild(sc2);
@@ -1129,9 +1212,58 @@ PAGES.art = (m) => {
   rare.appendChild(row(f, ph));
   rare.appendChild(el("div", "hint",
     "「자리표시」는 아스트라를 안 부르고 같은 규격의 아이보리 판을 채웁니다 — "
-    + "컴포지션과 빌드를 크레딧 없이 끝까지 돌려 볼 때 씁니다."));
+    + "컴포지션과 빌드를 크레딧 없이 끝까지 돌려 볼 때 씁니다."
+    + (card9
+      ? " 「전부 다시 받기」는 **아스트라**를 부릅니다 — 카드 배치에서는 보통 "
+        + "필요 없지만, 두루마리 배치(config 의 compose.layout)로 되돌릴 때 씁니다."
+      : "")));
   m.appendChild(rare);
 };
+
+/* FlowGenie 카드 — 내보내기 · 가져오기. 사람이 하는 일이 가운데 끼어 있다.
+   ★ 두 단추 사이는 **사람 차례**다. 그래서 진행 바를 쓰지 않고 결과만 적는다 —
+     돌고 있는 것처럼 보이면 기다리게 된다. */
+function flowgenieCard() {
+  const c = card("FlowGenie",
+    "① JSON 을 내보내 사이드패널에 넣고 **화면비 16:9** 로 돌립니다 → "
+    + "② 내려온 PNG 를 반입 폴더에 넣고 가져옵니다.");
+  const out = el("pre", "out");
+  out.textContent = S.fgLog || "";
+  out.style.display = S.fgLog ? "" : "none";
+  const ex = el("button", "btn primary", "① FlowGenie JSON 내보내기");
+  const im = el("button", "btn", "② 가져오기");
+  const ro = !!S.cfg?.readonly;
+  [ex, im].forEach((b) => { b.type = "button"; b.disabled = ro; });
+
+  const run = async (btn, path) => {
+    ex.disabled = im.disabled = true;
+    out.style.display = "";
+    out.textContent = "…";
+    try {
+      const r = await post(`/api/projects/${encodeURIComponent(S.slug)}/${path}`);
+      S.fgLog = r.log || JSON.stringify(r, null, 1);
+      out.textContent = S.fgLog;
+      // 그림이 늘었으니 현황을 다시 읽는다. 화면이 다시 그려지지만 로그는
+      // `S.fgLog` 에 있으므로 새로 그린 카드가 그대로 이어 보여 준다.
+      await loadProject(S.slug);
+    } catch (e) {
+      S.fgLog = "실패: " + e.message;
+      out.textContent = S.fgLog;
+    } finally {
+      ex.disabled = im.disabled = ro;
+    }
+  };
+  ex.onclick = () => run(ex, "flowgenie/export");
+  im.onclick = () => run(im, "flowgenie/import");
+  c.appendChild(row(ex, im));
+  c.appendChild(el("div", "hint",
+    "넣을 곳: `04_장면/_반입/`. 다운로드 폴더(`art.import_from`)도 같이 훑습니다. "
+    + "이름이 `flowgenie.json` 의 `image_filename` 과 맞는 것만 올라옵니다 — "
+    + "다운로드 폴더에는 지난 편 그림도 섞여 있습니다. "
+    + "`.gif` 는 PNG 시퀀스로 풀어 넣습니다(렌더가 GIF 을 되감을 수 없습니다)."));
+  c.appendChild(out);
+  return c;
+}
 
 /* 컴포지션 — **굽기 전에 화면을 보고 승인하는 자리** */
 PAGES.compose = (m) => {
@@ -1442,21 +1574,48 @@ async function chips() {
     });
   } catch (_) { set("#conn-llm", false, "Claude 확인 실패"); }
 
+  /* ★ **카드 배치에서 ChatGPT 는 선택이다.** 가운데 그림을 FlowGenie 로 받으므로
+   *   아스트라(= Codex)를 안 부른다. 그런데 칩이 빨갛게 떠 있으면 사람이
+   *   「로그인해야 하는구나」로 읽고 시간을 버린다 — 없어도 되는 것을 없어도
+   *   된다고 적어 준다. 끄지는 않는다: 두루마리 배치로 되돌리면 다시 필요하다.
+   *   (`016eb37` 의 교훈은 반대 방향이었다 — 초록불을 켜 두고 여덟 씬이 죽었다.
+   *    그래서 여기서도 **거짓 초록을 만들지 않는다.** 회색으로 둔다.) */
+  const cardLayout = (S.proj?.layout || S.cfg?.layout || "카드") === "카드";
   try {
     const s = await api("/api/imagegen/status");
-    /* ★ 「로그인됨」만 보고 초록불을 켜지 않는다. 토큰이 멀쩡해도 codex 판이 낮으면
-     *   아스트라를 못 부른다 — 실제로 여덟 씬이 전부 죽는 동안 칩은 초록이었고,
-     *   사람은 로그인을 의심하며 시간을 버렸다. */
-    set("#conn-img", s.ok, s.ok ? "ChatGPT 로그인됨" : "ChatGPT 준비 안 됨",
-      [s.message, s.how].filter(Boolean).join(NL));
-    $("#conn-img").onclick = () => connSheet("ChatGPT — 아스트라가 장면을 그립니다", {
+    const b = $("#conn-img");
+    if (cardLayout) {
+      b.classList.remove("ok", "bad");
+      b.classList.add("opt");
+      b.querySelector(".conn-text").textContent =
+        s.ok ? "ChatGPT 로그인됨 (선택)" : "ChatGPT 없어도 됩니다";
+      b.title = "카드 배치는 가운데 그림을 FlowGenie 로 받습니다 — "
+        + "아스트라를 안 부릅니다. 두루마리 배치로 되돌릴 때만 필요합니다.";
+    } else {
+      /* ★ 「로그인됨」만 보고 초록불을 켜지 않는다. 토큰이 멀쩡해도 codex 판이 낮으면
+       *   아스트라를 못 부른다 — 실제로 여덟 씬이 전부 죽는 동안 칩은 초록이었고,
+       *   사람은 로그인을 의심하며 시간을 버렸다. */
+      set("#conn-img", s.ok, s.ok ? "ChatGPT 로그인됨" : "ChatGPT 준비 안 됨",
+        [s.message, s.how].filter(Boolean).join(NL));
+    }
+    b.onclick = () => connSheet("ChatGPT — 아스트라가 장면을 그립니다", {
       ok: s.ok,
       path: s.cli_version ? `codex ${s.cli_version}` : "",
-      message: [s.message, s.how].filter(Boolean).join(" "),
+      message: (cardLayout
+        ? "카드 배치에서는 **필요 없습니다** — 가운데 그림을 FlowGenie 로 받습니다. "
+          + "두루마리 배치(config 의 compose.layout)로 되돌릴 때만 씁니다. "
+        : "") + [s.message, s.how].filter(Boolean).join(" "),
       // 안내문에 든 명령을 그대로 꺼내 복사 단추에 건다
       cmd: ((s.how || "").match(/`([^`]+)`/) || [])[1] || "",
     });
-  } catch (_) { set("#conn-img", false, "ChatGPT 확인 실패"); }
+  } catch (_) {
+    if (cardLayout) {
+      const b = $("#conn-img");
+      b.classList.remove("ok", "bad");
+      b.classList.add("opt");
+      b.querySelector(".conn-text").textContent = "ChatGPT 없어도 됩니다";
+    } else set("#conn-img", false, "ChatGPT 확인 실패");
+  }
 }
 
 /* ── 시작 ─────────────────────────────────────────────────────────────── */

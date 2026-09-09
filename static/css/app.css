@@ -413,6 +413,11 @@ label.field { display: flex; flex-direction: column; gap: 5px; font-size: var(--
 }
 .pill.ok { background: var(--ok-wash); color: var(--ok); }
 .pill.warn { background: var(--warn-wash); color: var(--warn); }
+
+/* 연결 칩의 **선택** 꼴 — 초록도 빨강도 아니다. 「없어도 된다」는 상태에
+   빨간불을 켜면 사람이 고치려고 시간을 버리고, 초록을 켜면 거짓말이 된다. */
+.conn.opt { color: var(--text-3); }
+.conn.opt .led { background: var(--text-3); box-shadow: none; }
 .pill.bad { background: var(--err-wash); color: var(--err); }
 
 .note {
@@ -619,11 +624,13 @@ table.board tbody th.ch { display: flex; align-items: baseline; gap: 8px; }
   box-shadow: inset 0 0 0 1px var(--hairline);
   padding: 10px 12px; margin-bottom: 8px;
 }
+/* ★ 슬라이드 칸이 격자에서 **빠졌다.** 조각마다 한 장이라 넷이면 528px 이고,
+   격자에 넣으면 자막·발음 칸이 짜부라진다 — 띠는 줄 위에 통째로 올린다. */
 .srow {
   display: grid; align-items: start; gap: 12px;
-  grid-template-columns: 74px 78px minmax(0, 1.15fr) minmax(0, 1fr) 96px;
+  grid-template-columns: 78px minmax(0, 1.15fr) minmax(0, 1fr) 96px;
 }
-.srow.nonarr { grid-template-columns: 74px 78px minmax(0, 1fr) 96px; }
+.srow.nonarr { grid-template-columns: 78px minmax(0, 1fr) 96px; }
 .srow.shead {
   background: none; box-shadow: none; padding: 0 12px 6px;
   font-size: var(--t-2xs); font-weight: 800; color: var(--text-3);
@@ -631,13 +638,34 @@ table.board tbody th.ch { display: flex; align-items: baseline; gap: 8px; }
 }
 .srow textarea { width: 100%; }
 
-/* 슬라이드 — 9:16 조각. **장면 제작 전에는 비어 있는 것이 맞다.**
-   이 칸이 채워졌는지가 곧 그 씬이 그려졌는지다. */
+/* ── 슬라이드 띠 — 씬 한 줄에 그림이 **여럿**이다 ──────────────────────
+   카드 배치는 자막 조각마다 그림이 갈리고, 한 조각 안에서 PNG 여러 장이
+   GIF 처럼 넘어갈 수도 있다. 조각 수가 씬마다 다르므로 가로로 흐르게 둔다.
+   ★ 비어 있는 조각도 칸을 지킨다 — 「몇 장이 비었나」가 한눈에 보여야
+     FlowGenie 를 다시 돌릴 수 있다. */
+.slidestrip {
+  display: flex; gap: 8px; align-items: flex-start;
+  overflow-x: auto; overflow-y: hidden;
+  padding-bottom: 6px; margin-bottom: 8px;
+  /* 격자 칸 안에 들어갈 때를 위해 — 기본 `min-width:auto` 가 내용만큼 벌어져
+     옆 칸을 밀어낸다. */
+  min-width: 0;
+}
+.slidestrip::-webkit-scrollbar { height: 6px; }
+.slidestrip::-webkit-scrollbar-thumb {
+  background: var(--hairline); border-radius: 3px;
+}
+
+/* 슬라이드 한 칸 — 9:16 조각. **장면 제작 전에는 비어 있는 것이 맞다.**
+   이 칸이 채워졌는지가 곧 그 조각이 그려졌는지다. */
 .slide {
-  width: 74px; aspect-ratio: 9 / 16; border-radius: var(--r-sm);
+  flex: 0 0 auto;
+  width: 132px; aspect-ratio: 9 / 16; border-radius: var(--r-sm);
   background: var(--paper-deep); overflow: hidden;
   box-shadow: inset 0 0 0 1px var(--hairline);
+  position: relative;             /* 얹는 글자(.sl-hook/.sl-cap)의 기준 */
 }
+.slide.final { box-shadow: inset 0 0 0 1px var(--hairline), 0 2px 8px rgb(var(--scrim-rgb) / .10); }
 .slide object, .slide img { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
 .slide.empty {
   display: grid; place-items: center;
@@ -662,30 +690,52 @@ table.board tbody th.ch { display: flex; align-items: baseline; gap: 8px; }
 
 @media (max-width: 1100px) {
   /* 좁아지면 세로로 접는다 — 가로 스크롤보다 낫다 */
-  .srow, .srow.nonarr { grid-template-columns: 74px minmax(0, 1fr); }
+  .srow, .srow.nonarr { grid-template-columns: 78px minmax(0, 1fr); }
   .srow.shead { display: none; }
   .smeta { flex-direction: row; align-items: center; }
 }
 
 /* 슬라이드에 얹는 글자 — 완성 화면과 같은 모양(위 띠 후크 · 아래 띠 자막).
-   장면이 없어도 얹는다. 글자가 넘치는지 잘리는지가 여기서 미리 보인다. */
-.slide { position: relative; }
+   장면이 없어도 얹는다. 글자가 넘치는지 잘리는지가 여기서 미리 보인다.
+   (`position: relative` 는 위쪽 `.slide` 규칙에 있다 — 두 벌로 두지 않는다.) */
 .sl-hook {
   position: absolute; left: 0; right: 0; top: 0;
   padding: 3px 3px 2px; text-align: center; line-height: 1.15;
   background: rgb(246 241 232 / .93);
 }
-.sl-hook .l1 { font-size: 7px; font-weight: 800; color: #1F4E79; }
-.sl-hook .l2 { font-size: 7px; font-weight: 800; color: #E07A2F; }
+.sl-hook .l1 { font-size: 11px; font-weight: 800; color: #1F4E79; }
+.sl-hook .l2 { font-size: 11px; font-weight: 800; color: #E07A2F; }
 .sl-cap {
   position: absolute; left: 0; right: 0; bottom: 0;
-  padding: 3px; font-size: 6px; line-height: 1.25; text-align: center;
+  padding: 3px; font-size: 9px; line-height: 1.25; text-align: center;
   color: #334155; background: rgb(246 241 232 / .93);
   max-height: 44%; overflow: hidden;
 }
 .sl-tag {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   font-size: 9px; color: var(--text-3);
+}
+/* 조각 번호와 플립북 장수 — 「이 칸이 몇 번째 조각이고 몇 장인가」. */
+.sl-m {
+  position: absolute; left: 4px; top: 4px;
+  min-width: 15px; padding: 1px 4px; border-radius: 7px;
+  background: rgb(var(--scrim-rgb) / .55); color: #fff;
+  font-size: 9px; font-weight: 800; text-align: center;
+}
+.sl-fr {
+  position: absolute; right: 4px; top: 4px;
+  padding: 1px 5px; border-radius: 7px;
+  background: #E07A2F; color: #fff;
+  font-size: 9px; font-weight: 800;
+}
+/* 조각보다 뒤에 붙어 **화면에 안 나오는** 그림. 정상 칸과 눈에 다르게 둔다 —
+   같아 보이면 「넣었는데 안 보인다」를 겪는다. */
+.slide.orphan { opacity: .45; box-shadow: inset 0 0 0 1.5px var(--err); }
+.sl-out {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 2px; text-align: center;
+  background: var(--err); color: #fff;
+  font-size: 9px; font-weight: 800;
 }
 
 /* 구간의 「돌고 있다 / 끝났다」 — 점 하나로는 안 보인다.
@@ -714,7 +764,9 @@ table.board tbody th.ch { display: flex; align-items: baseline; gap: 8px; }
 /* 장면 제작의 씬 줄 — **읽기 전용이다.** 글을 고치는 칸을 여기 또 두었더니
    스토리보드와 같은 표가 두 벌이 되어, 어디서 고쳐야 하는지 알 수 없었다. */
 .artline {
-  display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 12px;
+  /* 첫 칸은 조각 띠다 — 조각이 넷이면 528px 이라 폭을 묶고 가로로 흐르게 둔다.
+     `minmax(0, …)` 이어야 격자 칸의 기본 `min-width:auto` 가 옆 칸을 안 밀어낸다. */
+  display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 12px;
   align-items: start; padding: 10px 12px; margin-bottom: 8px;
   background: var(--bone); border-radius: var(--r);
   box-shadow: inset 0 0 0 1px var(--hairline);
@@ -764,15 +816,7 @@ table.board tbody th.ch { display: flex; align-items: baseline; gap: 8px; }
   overflow-x: auto; white-space: nowrap;
 }
 
-/* 슬라이드를 크게 — 74px 로는 글자가 띠를 넘치는지 안 보였다.
-   최종 화면이 있으면 그것이 곧 나갈 화면이라 더 볼 값이 있다. */
-.srow, .srow.nonarr { grid-template-columns: 132px 78px minmax(0, 1.15fr) minmax(0, 1fr) 96px; }
-.srow.nonarr { grid-template-columns: 132px 78px minmax(0, 1fr) 96px; }
-.slide { width: 132px; }
-.slide.final { box-shadow: inset 0 0 0 1px var(--hairline), 0 2px 8px rgb(var(--scrim-rgb) / .10); }
-.sl-hook .l1, .sl-hook .l2 { font-size: 11px; }
-.sl-cap { font-size: 9px; }
-.artline { grid-template-columns: 132px minmax(0, 1fr); }
-@media (max-width: 1100px) {
-  .srow, .srow.nonarr { grid-template-columns: 132px minmax(0, 1fr); }
-}
+/* ★ 예전에 이 자리에 **덮어쓰기 블록**이 있었다 — `.srow` 격자와 `.slide` 크기,
+   `.sl-hook`·`.sl-cap` 글자 크기가 파일 위쪽과 여기 두 벌로 정의돼 있었다.
+   그러면 위쪽 규칙을 고쳐도 **아무 일도 안 일어난다**(뒤가 이긴다). 위쪽 한
+   벌로 합쳤다. 크기를 바꿀 일이 있으면 그 규칙을 고치면 된다. */
