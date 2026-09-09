@@ -220,9 +220,20 @@ def state(slug: str) -> Dict[str, str]:
             rows = []
         out["artspec"] = "done" if (n and len(rows) == n) else ("part" if rows else "")
 
-    have = s6_art.present(slug)
-    if n:
-        out["art"] = "done" if len(have) >= n else ("part" if have else "")
+    # ★ 카드 배치는 씬당 한 파일이 아니라 **조각마다 한 장**이다. `present()` 는
+    #   씬당 하나로 접으므로 「조각 셋 중 하나만 왔다」를 못 본다.
+    from core import config
+    if config.layout() == config.LAYOUT_CARD:
+        many = s6_art.present_many(slug)
+        want = sum(max(1, len(x.get("cues") or [])) for x in scenes) or n
+        got = sum(len(v) for v in many.values())
+        if n:
+            out["art"] = ("done" if got >= want
+                          else ("part" if got else ""))
+    else:
+        have = s6_art.present(slug)
+        if n:
+            out["art"] = "done" if len(have) >= n else ("part" if have else "")
 
     if (paths.comp_dir(slug) / "index.html").exists():
         out["compose"] = "done"
@@ -264,18 +275,48 @@ def stale(slug: str) -> List[str]:
     return out
 
 
+# ★ **배치가 「장면」 단계의 성격을 바꾼다.** 표는 하나로 두고, 화면이 받는
+#   모양만 여기서 갈아 준다 — 표를 두 벌로 만들면 어디서 고칠지 알 수 없게 된다.
+#
+#     두루마리   아스트라가 SVG 를 코드로 쓴다. 크레딧 $ 를 쓰고 10분쯤 걸린다.
+#     카드       사람이 FlowGenie 로 그려 넣는다. **크레딧이 0 이다** —
+#                그런데 표에 `costs=True` 가 박혀 있어서, 그대로 두면 화면이
+#                「$」를 달고 「가장 비싼 자리입니다」라고 거짓말을 한다.
+_CARD_VIEW = {
+    "art": {"name": "장면 받기", "costs": False},
+}
+_CARD_GROUP = {
+    "video": {"label": "장면 받기",
+              "hint": "FlowGenie JSON 을 내보내 그림을 만들고, 받은 PNG 를 "
+                      "가져옵니다. 크레딧을 쓰지 않습니다."},
+}
+
+
 def as_json(slug: Optional[str] = None) -> Dict[str, Any]:
     """화면이 받는 모양 — 묶음과 단계를 함께 준다."""
+    from core import config          # 순환 import 를 피해 늦게 부른다
+
     st = state(slug) if slug else {}
     sl = set(stale(slug)) if slug else set()
-    stage_rows = [{"key": s.key, "name": s.name, "costs": s.costs, "rule": s.rule,
+    card = config.layout() == config.LAYOUT_CARD
+    view = _CARD_VIEW if card else {}
+    gview = _CARD_GROUP if card else {}
+
+    def costs_of(k: str) -> bool:
+        return bool(view.get(k, {}).get("costs", BY_KEY[k].costs))
+
+    stage_rows = [{"key": s.key,
+                   "name": view.get(s.key, {}).get("name", s.name),
+                   "costs": costs_of(s.key), "rule": s.rule,
                    "needs": list(s.needs), "state": st.get(s.key, ""),
                    "stale": s.key in sl}
                   for s in STAGES]
-    group_rows = [{"key": g.key, "label": g.label, "primary": g.primary,
+    group_rows = [{"key": g.key,
+                   "label": gview.get(g.key, {}).get("label", g.label),
+                   "primary": g.primary,
                    "stages": list(g.stages), "screens": list(g.screens),
-                   "hint": g.hint,
-                   "costs": any(BY_KEY[k].costs for k in g.stages)}
+                   "hint": gview.get(g.key, {}).get("hint", g.hint),
+                   "costs": any(costs_of(k) for k in g.stages)}
                   for g in GROUPS]
 
     def roll(keys) -> str:
@@ -286,10 +327,16 @@ def as_json(slug: Optional[str] = None) -> Dict[str, Any]:
             return "done"
         return "part" if any(vals) else ""
 
-    screen_rows = [{"key": sc.key, "name": sc.name, "stages": list(sc.stages),
-                    "hint": sc.hint,
-                    "costs": any(BY_KEY[k].costs for k in sc.stages),
+    _SCREEN_CARD = {"art": {"name": "장면 받기",
+                            "hint": "FlowGenie 로 그려 04_장면/ 에 넣습니다."}}
+    sview = _SCREEN_CARD if card else {}
+    screen_rows = [{"key": sc.key,
+                    "name": sview.get(sc.key, {}).get("name", sc.name),
+                    "stages": list(sc.stages),
+                    "hint": sview.get(sc.key, {}).get("hint", sc.hint),
+                    "costs": any(costs_of(k) for k in sc.stages),
                     "state": roll(sc.stages),
                     "stale": any(k in sl for k in sc.stages)}
                    for sc in SCREENS]
-    return {"groups": group_rows, "stages": stage_rows, "screens": screen_rows}
+    return {"groups": group_rows, "stages": stage_rows, "screens": screen_rows,
+            "layout": config.layout()}

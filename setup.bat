@@ -121,17 +121,25 @@ if not exist "config.local.json" (
 rem --- 6. Logins -----------------------------------------------------------
 echo [6/6] Subscription logins (no API keys are used)
 echo.
-echo       This app calls two providers, each with its own login:
+echo       REQUIRED - one login:
 echo.
-echo         SCRIPT / IMAGE PROMPTS  --^>  Claude Code
+echo         SCRIPT / MANUSCRIPT / IMAGE PROMPTS  --^>  Claude Code
 echo             run:  claude
 echo             (once; it opens a browser)
 echo.
-echo         SCENE ARTWORK           --^>  ChatGPT via Codex CLI
+echo       OPTIONAL - only for the "scroll" layout:
+echo.
+echo         SCENE ARTWORK (Astra)   --^>  ChatGPT via Codex CLI
 echo             run:  codex login
 echo.
-echo       The two are deliberately NOT wired together. They run in separate
-echo       processes and never read each other's credentials.
+echo       The default layout is "card": the centre 16:9 picture is drawn
+echo       by you with FlowGenie (a Chrome extension) and dropped into the
+echo       scene folder. That path calls NO ChatGPT and costs no credits.
+echo       Codex is needed only if you set compose.layout back to the
+echo       scroll layout, where Astra writes an animated SVG per scene.
+echo.
+echo       The two providers are deliberately NOT wired together. They run
+echo       in separate processes and never read each other's credentials.
 echo.
 echo       NOTE: "codex login status" only checks that a file exists. It says
 echo       "Logged in" even when the token expired. The app checks the real
@@ -145,7 +153,7 @@ if exist "%USERPROFILE%\.claude\.credentials.json" (
 if exist "%USERPROFILE%\.codex\auth.json" (
   echo       ChatGPT : credentials file present ^(expiry checked at runtime^)
 ) else (
-  echo       ChatGPT : NOT logged in yet  --^>  run  codex login
+  echo       ChatGPT : not logged in - fine, the card layout does not use it
 )
 
 :done
