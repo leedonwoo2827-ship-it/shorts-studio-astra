@@ -6,6 +6,12 @@
 
     narration_text  →  02_음성/003.wav  →  audio_sec (실측)  →  씬 길이
 
+★ **낱말 시각(`marks`)도 같이 받는다.** edge 가 `WordBoundary` 로 「어느 낱말이
+  몇 초에 나오는지」를 준다. 씬 길이만 실측하고 조각 시각은 글자 수로 추정하면
+  자막이 말보다 이르거나 늦게 뜨는데, 카드 배치는 자막이 쌓여 남으므로 그 어긋남이
+  씬 끝까지 보인다. 그래서 여기서 받아 `s4_subs` 로 넘긴다. 엔진이 안 주면 없다 —
+  그때는 `s4_subs` 가 예전처럼 글자 수 비율로 물러선다.
+
 ★ **스탬프로 재합성을 아낀다.** `audio_of = sha256(voice|speed|text)[:16]` 이
   그대로면 그 씬은 건드리지 않는다. 발음 한 줄 고쳤을 때 씬 하나만 다시 굽는다.
 
@@ -33,6 +39,15 @@ ROOT = Path(__file__).resolve().parents[1]
 def stamp(voice: str, speed: float, text: str) -> str:
     raw = f"{voice}|{speed}|{text}".encode("utf-8")
     return hashlib.sha256(raw).hexdigest()[:16]
+
+
+def text_stamp(text: str) -> str:
+    """글만의 지문. `marks` 가 **어느 글에서 나왔는지** 대조하는 데 쓴다.
+
+    `stamp()` 와 따로 두는 이유: 목소리·배속이 바뀌면 소리는 다시 구워야 하지만,
+    낱말 시각이 그 글의 것인지 아닌지를 묻는 데 목소리는 상관이 없다.
+    """
+    return hashlib.sha256((text or "").strip().encode("utf-8")).hexdigest()[:16]
 
 
 def _edge_voice(voice: str) -> str:
@@ -74,7 +89,15 @@ def run(slug: str, *, force: bool = False,
             continue
         want = stamp(voice, speed, text)
         have = s.get("audio_of")
-        if not force and have == want and paths.wav(slug, no).exists():
+        # ★ **낱말 시각이 없으면 소리가 맞아도 다시 굽는다.** 예전에 구운 씬에는
+        #   `marks` 가 없고, 스탬프만 보면 영원히 건너뛴다 — 그러면 자막 정렬이
+        #   기존 작업물에는 **끝까지 안 켜진다.** edge 는 마크를 주므로 한 번만
+        #   다시 구우면 된다. 마크를 안 주는 엔진(voicewright)에서 이 조건을
+        #   걸면 **매번 전부 다시 굽는다** — 그래서 engine 을 본다.
+        need_marks = (engine == "edge"
+                      and s.get("marks_of") != text_stamp(text))
+        if (not force and have == want and not need_marks
+                and paths.wav(slug, no).exists()):
             kept.append(no)
             continue
         item: Dict[str, Any] = {"no": no, "text": text}
@@ -162,6 +185,21 @@ def run(slug: str, *, force: bool = False,
         s["audio_sec"] = float(got["sec"])
         s["audio_of"] = stamp(voice, speed, (s.get("narration_text") or "").strip())
         s["audio"] = f"{paths.AUDIO}/{got['file']}"
+        # ★ **낱말 시각을 버리지 않는다.** 엔진이 준 `WordBoundary` 다.
+        #   `s4_subs` 가 자막 조각을 글자 수 추정이 아니라 이 시각에 붙인다.
+        #   엔진이 안 주면(voicewright) 칸을 지운다 — 남겨 두면 옛 음성의
+        #   낱말 시각으로 새 음성에 자막을 붙인다.
+        marks = got.get("marks") or []
+        if marks:
+            s["marks"] = marks
+            # ★ **어느 글에서 나온 마크인지 적어 둔다.** 사람이 발음 대본을 손으로
+            #   고치면 wav 와 마크는 옛 글의 것인데 `s4_subs` 는 새 글로 문장을
+            #   센다. 어절 수가 우연히 맞으면 **엉뚱한 낱말에 자막이 붙는다** —
+            #   오류도 경고도 없이. 그래서 글을 지문으로 남겨 대조하게 한다.
+            s["marks_of"] = text_stamp(s.get("narration_text") or "")
+        else:
+            s.pop("marks", None)
+            s.pop("marks_of", None)
         made.append(no)
 
     total = round(sum(float(s.get("audio_sec") or 0) for s in scenes), 2)

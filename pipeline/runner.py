@@ -158,6 +158,12 @@ def stage_subs(slug: str, log: Log, **_: Any) -> Dict[str, Any]:
     if out.get("estimated"):
         log(f"  ⚠ 씬 {out['estimated']} 은 소리가 없어 길이를 **추정**했습니다. "
             f"「음성」을 돌리면 실측으로 바뀝니다.")
+    # 조각 시각을 낱말에 못 붙인 씬. 물러선 것을 조용히 두면 「정렬됐다」고 믿는다.
+    if out.get("cue_estimated"):
+        log(f"  ⚠ 씬 {out['cue_estimated']} 은 조각 시각을 **글자 수로 나눴습니다** "
+            f"(낱말 시각을 못 맞춤). 자막이 말보다 이르거나 늦게 뜰 수 있습니다.")
+    else:
+        log("  조각 시각을 낱말 발화 시각에 맞췄습니다.")
     return out
 
 

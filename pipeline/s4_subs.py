@@ -1,13 +1,26 @@
 # -*- coding: utf-8 -*-
 """S4 자막 — SRT + 큐. **모델을 부르지 않는다(무료).**
 
-씬 하나의 자막을 **읽을 수 있는 덩어리(큐)로 쪼개고**, 그 씬의 실측 음성 길이를
-글자 수 비율로 나눠 준다. 낱말 단위 정렬(whisper)을 쓰지 않는 이유는 30초짜리에
-그 무게를 지고 갈 값이 없기 때문이다 — 글자 비율로도 눈에 어긋나지 않는다.
+씬 하나의 자막을 **읽을 수 있는 덩어리(큐)로 쪼개고**, 각 조각이 **실제로 그 말이
+나오는 순간**에 뜨게 시각을 매긴다.
 
     씬 3  audio_sec 5.30   "우편 요금이 1페니로 통일되자 / 지식도 편지를 타기 시작했습니다"
-                            ├ 0.00~2.42 (16자)
-                            └ 2.42~5.30 (19자)
+                            ├ 0.00~2.42   ← marks: 문장1 첫 낱말
+                            └ 2.42~5.30   ← marks: 문장2 첫 낱말 「지식도」 t=2.42
+
+★ **문장을 앵커로 삼는다.** `s3_tts` 가 받아 온 `marks`(edge 의 `WordBoundary`)는
+  **`narration_text`(발음교정본)의 어절**이고, 자막은 `srt_text` 에서 쪼갠다.
+  둘은 글자가 다르다 — 「1840년」이 「천팔백사십 년」으로 읽히므로 낱말끼리는
+  못 맞춘다. 그런데 **문장은 그대로 남는다.** 그래서 문장 경계만 마크에 붙이고,
+  한 문장이 여러 조각으로 갈린 경우에만 그 문장 안에서 글자 수로 나눈다.
+
+  실측(edge-tts 7.2.8, ko-KR-SunHiNeural, 네 표본): 마크 수 = `narration_text`
+  어절 수가 **정확히 맞았고**, 문장별 어절 수로 마크를 순서대로 소비하면 문장
+  경계가 제 낱말에 떨어졌다. 그래서 이 대응을 쓴다.
+
+★ **못 맞추면 글자 수 비율로 물러선다** (`_spread`). 마크가 없는 엔진
+  (voicewright)도 있고, 발음교정이 문장을 가르면 문장 수가 어긋난다. 그때는
+  `cues_estimated` 를 세워 사람이 알 수 있게 한다. 조용히 틀리는 것이 가장 나쁘다.
 
 ★ 쪼개는 자리는 **띄어쓰기와 쉼표**다. 낱말 가운데를 자르지 않는다.
 
@@ -29,6 +42,8 @@ from typing import Any, Dict, List, Tuple
 
 from core import config, paths
 from core.atomic_io import atomic_write_json, atomic_write_text
+
+from . import s3_tts
 
 # 세로 화면 아래 띠는 두 줄까지 읽힌다. 한 줄 ~13자 x 2 = 26자에서 끊는다.
 # 목록형은 한 줄만 쓰고 잦게 끊는다 — 조각 하나가 컷 하나라서다.
@@ -57,17 +72,30 @@ def split_cues(text: str, limit: int = CUE_MAX) -> List[str]:
       때문이고, 손으로 그린 벡터 도해는 읽는 데 시간이 더 걸린다.
       컷 수를 늘리는 것이 목표가 아니라 **읽히는 것**이 목표다.
     """
+    return [c for g in split_cues_grouped(text, limit) for c in g]
+
+
+def sentences(text: str) -> List[str]:
+    """문장으로 나눈다. `srt_text` 와 `narration_text` 에 같은 자를 댄다."""
     text = re.sub(r"\s+", " ", (text or "").strip())
     if not text:
         return []
+    return [s.strip() for s in _SENT.split(text) if s and s.strip()]
 
-    # 1) 문장으로 먼저 나눈다.
-    out: List[str] = []
-    for sent in [s.strip() for s in _SENT.split(text) if s and s.strip()]:
+
+def split_cues_grouped(text: str, limit: int = CUE_MAX) -> List[List[str]]:
+    """**문장마다 한 묶음**으로 조각을 낸다.
+
+    묶음을 유지하는 것이 요점이다 — 시각을 붙일 때 「이 조각이 몇 번째 문장의
+    것인가」를 알아야 문장 경계를 마크에 맞출 수 있다. 평탄화해 버리면 그 정보가
+    사라지고, 그러면 다시 글자 수 비율밖에 쓸 것이 없다.
+    """
+    out: List[List[str]] = []
+    for sent in sentences(text):
         if len(sent) <= limit:
-            out.append(sent)
+            out.append([sent])
         else:
-            out.extend(_chop(sent, limit))   # 너무 긴 문장만 어절로 쪼갠다
+            out.append(_chop(sent, limit))   # 너무 긴 문장만 어절로 쪼갠다
     return out
 
 
@@ -112,6 +140,65 @@ def _spread(cues: List[str], dur: float) -> List[Tuple[float, float]]:
     return spans
 
 
+# 문장 시각이 겹치지 않게 두는 최소 간격. 자막이 두 줄 동시에 뜨는 것을 막는다.
+_MIN_STEP = 0.05
+
+
+def align(groups: List[List[str]], marks: List[Dict[str, Any]],
+          dur: float, narration: str) -> List[Tuple[float, float]] | None:
+    """조각 시각을 **실제 발화 시각**에 붙인다. 못 맞추면 `None`.
+
+    맞추는 방법은 문장 앵커다 (머리글 참고):
+        1. `narration_text` 를 문장으로 나누고 문장마다 어절 수를 센다
+        2. 그 수로 `marks` 를 순서대로 소비해 **문장 첫 낱말의 시각**을 얻는다
+        3. 문장 i 의 구간 = [문장 i 시작, 문장 i+1 시작)
+        4. 한 문장이 여러 조각이면 **그 구간 안에서만** 글자 수로 나눈다
+
+    `None` 을 돌려주는 자리를 넉넉히 뒀다. 반쯤 맞은 시각은 틀린 시각보다 나쁘다 —
+    사람이 「정렬됐다」고 믿게 만든다.
+    """
+    if not marks or not narration or dur <= 0 or not groups:
+        return None
+
+    sents = sentences(narration)
+    if len(sents) != len(groups):
+        return None                      # 발음교정이 문장을 갈랐다/붙였다
+    counts = [len(x.split()) for x in sents]
+    if sum(counts) != len(marks):
+        return None                      # 어절과 마크가 안 맞는다
+
+    # 문장 첫 낱말의 시각
+    starts: List[float] = []
+    acc = 0
+    for n in counts:
+        if acc >= len(marks):
+            return None
+        starts.append(float(marks[acc].get("t") or 0.0))
+        acc += n
+
+    # ★ 첫 문장은 **씬 머리에 붙인다.** 실측으로 첫 마크가 0.09~0.10 초라,
+    #   그대로 쓰면 씬마다 자막 없는 프레임 세 장이 앞에 붙는다.
+    starts[0] = 0.0
+    for i in range(1, len(starts)):     # 단조 증가 · 씬 안쪽
+        lo = starts[i - 1] + _MIN_STEP
+        starts[i] = min(max(starts[i], lo), dur)
+    if starts[-1] >= dur:
+        return None                      # 마지막 문장이 들어갈 자리가 없다
+
+    spans: List[Tuple[float, float]] = []
+    for i, g in enumerate(groups):
+        s0 = starts[i]
+        s1 = starts[i + 1] if i + 1 < len(starts) else dur
+        if s1 - s0 <= 0:
+            return None
+        for a, b in _spread(g, s1 - s0):
+            spans.append((round(s0 + a, 3), round(s0 + b, 3)))
+    if not spans:
+        return None
+    spans[-1] = (spans[-1][0], round(dur, 3))   # 끝은 정확히 씬 끝
+    return spans
+
+
 def _ts(sec: float) -> str:
     sec = max(0.0, float(sec))
     h, rem = divmod(sec, 3600)
@@ -144,8 +231,20 @@ def run(slug: str) -> Dict[str, Any]:
         s["start_sec"] = round(clock, 3)
         s["dur_sec"] = round(dur, 3)
 
-        cues = split_cues(s.get("srt_text") or "", limit)
-        spans = _spread(cues, dur)
+        groups = split_cues_grouped(s.get("srt_text") or "", limit)
+        cues = [c for g in groups for c in g]
+        # 음성이 아직 없으면 마크가 있어도 그 음성의 것이 아니다 — 쓰지 않는다.
+        narr = s.get("narration_text") or ""
+        # ★ 마크가 **이 글**에서 나온 것일 때만 쓴다 (지문 대조).
+        fresh = s.get("marks_of") == s3_tts.text_stamp(narr)
+        spans = (None if (s.get("audio_estimated") or not fresh)
+                 else align(groups, s.get("marks") or [], dur, narr))
+        if spans is None:
+            spans = _spread(cues, dur)
+            if cues:
+                s["cues_estimated"] = True
+        else:
+            s.pop("cues_estimated", None)
         s["cues"] = [{"t": st, "d": round(en - st, 3), "text": c}
                      for c, (st, en) in zip(cues, spans)]
 
@@ -186,7 +285,8 @@ def run(slug: str) -> Dict[str, Any]:
         w.writerows(csv_rows)
 
     return {"cues": idx, "total_sec": total, "cue_limit": limit,
-            "estimated": [int(s["no"]) for s in scenes if s.get("audio_estimated")]}
+            "estimated": [int(s["no"]) for s in scenes if s.get("audio_estimated")],
+            "cue_estimated": [int(s["no"]) for s in scenes if s.get("cues_estimated")]}
 
 
 def _load(slug: str) -> Dict[str, Any]:
