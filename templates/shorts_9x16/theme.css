@@ -30,9 +30,13 @@ body {
   background: var(--ivory);
 }
 
-/* 그림층 — 폭을 화면에 맞추고 세로로 가운데. 남는 위아래는 아이보리(안 보인다).
-   기본 배율을 1보다 크게 두어 켄번스가 빈 가장자리를 물지 않게 한다. */
-.art {
+/* 그림층(두루마리) — 폭을 화면에 맞추고 세로로 가운데. 남는 위아래는
+   아이보리(안 보인다). 기본 배율을 1보다 크게 두어 켄번스가 빈 가장자리를
+   물지 않게 한다.
+   ★ 카드 배치의 그림칸은 파일 아래쪽 「카드 배치」 절에 있다. 여기 규칙에
+     접두어를 붙인 이유가 그것이다 — 한 선택자에 두 배치를 담으면 어느 쪽이
+     사는지 알 수 없게 된다. */
+.lay-scroll .art {
   position: absolute;
   left: 0; width: var(--W);
   top: calc((var(--H) - var(--artH)) / 2);
@@ -97,7 +101,9 @@ body {
 }
 
 /* ── 위 띠 · 후크 ───────────────────────────────────────────────────── */
-.hook {
+/* 두루마리 배치 — 화면 위쪽 띠에 박혀 영상 내내 있다.
+   카드 배치의 후크는 **표지 씬 한복판**에 크게 뜬다(아래 「카드 배치」 절). */
+.lay-scroll .hook {
   position: absolute;
   left: 64px; right: 64px; top: 96px;
   z-index: 3;
@@ -149,7 +155,10 @@ body {
 }
 
 /* ── 아래 띠 · 자막 ─────────────────────────────────────────────────── */
-.cc {
+/* 두루마리 배치 — 조각 하나가 떴다 **꺼진다.** 그래서 조각마다 절대 위치다.
+   ★ 카드 배치는 조각이 한 단락 안에 **쌓이므로** `.cc` 가 인라인 `<span>` 이다.
+     이 규칙이 그쪽에도 걸리면 조각이 전부 같은 자리에 겹쳐 앉는다. */
+.lay-scroll .cc {
   position: absolute;
   left: 72px; right: 72px;
   /* ★ **자막은 아래에서 자란다.** `bottom` 을 잡아 두면 줄이 늘 때 위로 자라야
@@ -183,6 +192,7 @@ body {
   font-style: normal;
   color: var(--accent);
 }
+/* 자막 안의 강조는 두 배치가 같다 — 위 규칙이 `.para .cc em` 에도 그대로 걸린다. */
 
 /* 해시태그 — 30초 내내 한 자리에 있다 */
 .tags {
@@ -204,7 +214,7 @@ body {
 }
 
 /* ── 진행 레일 — 위 띠 맨 아래. 씬이 몇 개고 지금 몇 번째인지 보인다 ── */
-.rail {
+.lay-scroll .rail {
   position: absolute;
   left: 64px; right: 64px; top: 56px;
   height: 8px;
@@ -243,3 +253,206 @@ body {
   stroke-linejoin: round;
 }
 .accent .dot { fill: var(--accent); }
+
+/* ══ 카드 배치 ═══════════════════════════════════════════════════════════
+ *
+ * 레퍼런스(`_plan/분야별 AI 최강 모델 (2026.9).mp4`)를 프레임으로 뽑아 행·열
+ * 프로파일로 **재서** 넣은 좌표다. 1080x1920 환산:
+ *
+ *      y   63.. 90   시리즈 라벨      x 84 부터, 30px
+ *      y  105..111   진행 레일        x 78..1002, 두께 6px
+ *      y  288..381   큰 꼭지 제목      가운데, 약 104px
+ *      y  435..474   배지 pill        가운데
+ *      y  705..759   모델명 캡션       가운데, 28px
+ *      y  816..1363  ★ 16:9 카드      x 54, 972x547
+ *      y 1404..1920  쌓이는 자막 단락   x 84 부터, 45px, 줄간 1.45
+ *
+ * ★ **카드는 절대 안 움직인다.** 머리 글줄(제목·배지·캡션)은 카드 **위쪽으로**
+ *   자란다 — `bottom` 으로 앉혔다. 위에서 흘려 내리면 배지나 캡션이 없는 꼭지에서
+ *   빈 자리가 생겨 카드가 위로 뜨고, 씬이 갈릴 때 **컷이 아니라 그림이 흔들리는
+ *   것으로 보인다**(두루마리에서 세로 정렬로 물린 것과 같은 병이다).
+ */
+
+/* ── 그림칸 — 화면 가운데 16:9 한 장 ─────────────────────────────────── */
+.lay-card .art {
+  position: absolute;
+  left: var(--cardX);
+  top: var(--cardY);
+  width: var(--cardW);
+  height: var(--cardH);
+  border-radius: var(--cardR);
+  background: color-mix(in srgb, var(--ink) 6%, var(--ivory));
+  box-shadow: 0 10px 34px color-mix(in srgb, var(--ink) 14%, transparent);
+  transform-origin: center center;
+}
+
+/* 표지 씬 — 카드를 화면 가운데로 내린다. 위는 후크가, 아래는 브랜드가 쓴다. */
+.lay-card .scene.cover .art { top: 720px; }
+
+/* 겹 — 조각 하나가 겹 하나다. 전부 같은 자리에 쌓아 두고 겹쳐 넘긴다. */
+.lay-card .shot {
+  position: absolute; inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+}
+/* 프레임 — 겹 안에서 딱딱 갈리는 한 장. 플립북이면 여러 장이 쌓인다. */
+.lay-card .fr {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  background-position: center center;
+  background-repeat: no-repeat;
+  background-size: cover;      /* 16:9 로 안 맞게 온 그림은 잘라 채운다 */
+  transform-origin: center center;
+  will-change: transform;
+}
+.lay-card video.fr { object-fit: cover; display: block; }
+.lay-card .shot.k-svg > svg { display: block; width: 100%; height: 100%; }
+
+/* ── 좌상단 시리즈 라벨 — 표지가 지나간 뒤 끝까지 ────────────────────── */
+.lay-card .serieslabel {
+  position: absolute;
+  left: 84px; top: 58px;      /* 잉크가 y63 에 오도록 2px 올려 잡았다 */
+  z-index: 5;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: color-mix(in srgb, var(--ink) 62%, var(--ivory));
+}
+
+/* ── 진행 레일 — 통짜 하나 ───────────────────────────────────────────── */
+.lay-card .rail {
+  position: absolute;
+  left: 78px; right: 78px; top: 105px;
+  height: 6px;
+  z-index: 5;
+  display: flex;
+}
+
+/* ── 꼭지 머리 — 카드 위쪽으로 자란다 ───────────────────────────────── */
+.lay-card .cardhead {
+  position: absolute;
+  left: var(--cardX); right: var(--cardX);
+  /* ★ **위에 앉힌다.** 실측한 레퍼런스 제목 자리(y 288)에 맞춘 값이다.
+       처음에는 아래(카드 위 57px)에 앉혔는데, 배지·캡션·로고가 없는 꼭지에서
+       제목이 y 665 로 내려앉아 **y 130~660 이 텅 비었다**(실측 프레임).
+       카드는 절대 위치라 머리가 위에 있어도 밀리지 않는다 — 위로 앉히는 것이
+       레퍼런스와 같고 빈자리도 위가 아니라 **아래(로고 자리)**로 간다.
+       아래 여유: 816 - 276 - 57 = 483px. 제목+배지+캡션+로고가 다 들어간다. */
+  top: 281px;                 /* 잉크가 y288 에 오도록 잡았다 */
+  z-index: 3;
+  text-align: center;
+}
+.lay-card .cardtitle {
+  font-family: "BlackHanSans", "Pretendard", "Malgun Gothic", sans-serif;
+  font-weight: 400;
+  /* ★ 글자 수에 따라 줄어든다. 고정 크기 + nowrap 은 상한을 넘긴 제목을
+     **경고도 없이 잘라 낸다**(후크에서 이미 한 번 물린 자리다).
+     `--titlelen` 은 컴포지션이 실제 글자 수로 채운다(없으면 8자로 본다). */
+  font-size: min(104px, calc(var(--cardW) / var(--titlelen, 8) * 1.02));
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+/* 배지 — 옅은 알약. 「신규 · 지난달 대비」 같은 상태 한 줄. */
+.lay-card .cardbadge {
+  display: inline-block;
+  margin-top: 40px;
+  padding: 10px 26px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--ivory));
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--accent);
+  white-space: nowrap;
+}
+/* 로고 — 있으면 제목·배지 아래 105px 정사각. `04_장면/_아이콘/NNN.png` 을
+   넣으면 뜬다. 없으면 **아예 안 그린다**(자리를 안 먹는다). 레퍼런스에서
+   제목과 캡션 사이를 채우던 것이 이것이다. */
+.lay-card .cardlogo {
+  display: block;
+  width: 105px; height: 105px;
+  /* 실측 대조: 배지 아래 98px 을 비우면 로고가 레퍼런스와 같은 y582 에 앉는다 */
+  margin: 98px auto 0;
+  object-fit: contain;
+  border-radius: 22px;
+}
+
+/* 모델명 줄 — 카드 바로 위 작은 캡션. 로고 바로 아래에 붙는다(실측 18px). */
+.lay-card .cardsub {
+  margin-top: 18px;
+  font-size: 28px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: color-mix(in srgb, var(--ink) 55%, var(--ivory));
+  word-break: keep-all;
+}
+
+/* ── 표지 씬의 고정 후크 — 화면 위쪽에 크게 두 줄 ───────────────────── */
+.lay-card .hook {
+  position: absolute;
+  left: var(--cardX); right: var(--cardX);
+  top: 260px;
+  z-index: 4;
+  text-align: center;
+}
+.lay-card .hook .h1, .lay-card .hook .h2 {
+  font-size: min(118px, calc(var(--cardW) / var(--hooklen, 12) * 1.02));
+  line-height: 1.14;
+}
+/* 가운데 맞춘 두 줄 아래 밑줄은 어색하다 — 표지에서는 안 그린다.
+   (`#rufix` 를 향한 GSAP 트윈은 그대로 두면 아무 일도 안 한다.) */
+.lay-card .hook .rule { display: none; }
+
+/* 표지 하단 브랜드 */
+.lay-card .brand {
+  position: absolute;
+  left: 0; right: 0; bottom: 118px;
+  z-index: 4;
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-align: center;
+  color: color-mix(in srgb, var(--ink) 70%, var(--ivory));
+}
+
+/* ── 자막 — 한 단락에 조각이 쌓인다 ─────────────────────────────────── */
+.lay-card .para {
+  position: absolute;
+  left: 84px; right: 84px;
+  /* ★ **위**로 앉힌다. 아래로 앉히면 조각이 쌓일 때마다 단락이 위로 자라
+     이미 읽은 줄이 움직인다 — 읽는 사람이 매번 눈을 다시 잡아야 한다.
+     위를 고정하면 새 줄만 아래에 붙는다. */
+  top: var(--paraTop);
+  /* 아래 96px 은 **비워 둔다.** 마무리 코멘트가 그 자리에 앉으므로, 여기서
+     40px 까지 쓰면 마지막 씬에서 단락과 코멘트가 겹친다 — 자막이 해시태그를
+     덮은 것과 같은 병이다. 단락은 다섯 줄이면 1729px 에서 끝나므로 남는다. */
+  bottom: 96px;
+  z-index: 4;
+  font-size: 45px;
+  font-weight: 700;
+  line-height: 1.45;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  text-align: left;
+  /* 한글은 브라우저가 기본으로 아무 데서나 줄을 끊는다 — 어절 경계에서만. */
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  /* 넘치면 잘린다. 자막이 그림칸을 밀어 올리는 것보다 낫다 —
+     넘치는 것은 `SRT_MAX` 90자를 넘긴 대본이고, 그건 대본에서 고칠 일이다. */
+  overflow: hidden;
+}
+/* 조각은 **인라인**이다. 절대 위치를 주면 전부 한 자리에 겹친다. */
+.lay-card .para .cc { display: inline; }
+
+/* 마무리 코멘트 — 아웃트로 카드를 만들지 않는 대신 마지막 씬 아래 한 줄. */
+.lay-card .closecmt {
+  position: absolute;
+  left: 84px; right: 84px; bottom: 32px;
+  z-index: 5;
+  font-size: 32px;
+  font-weight: 600;
+  text-align: center;
+  color: color-mix(in srgb, var(--ink) 60%, var(--ivory));
+}

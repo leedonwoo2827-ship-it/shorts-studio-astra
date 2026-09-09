@@ -26,7 +26,10 @@ _DEFAULTS: Dict[str, Any] = {
                "gap_sec": 0.12},
     "narration": {"chars_per_sec": 6.51, "voice": "F2", "speed": 1.2, "total_step": 8},
     "compose": {"width": 1080, "height": 1920, "fps": 30,
+                "layout": "카드",
                 "band_top": 300, "band_bottom": 320,
+                "series_label": "", "brand": "", "close_comment": "",
+                "card": {"margin": 54, "top": 816, "radius": 30, "para_top": 1392},
                 "ivory": "#F6F1E8", "ink": "#1F4E79",
                 "accent": "#E07A2F", "text": "#334155", "sub_ink": "#9DC3E6"},
     "image": {"size": "1024x1536", "format": "png",
@@ -107,6 +110,51 @@ def get(dotted: str, default: Any = None) -> Any:
             return default
         node = node[part]
     return node
+
+
+# 배치 이름. 두 벌이 한 템플릿에 산다.
+LAYOUT_CARD = "카드"
+LAYOUT_SCROLL = "두루마리"
+
+# 배치별 그림 비율 — 그림칸의 **높이 ÷ 폭**이다.
+#   두루마리  3/2   세로 판. 화면 폭에 맞추고 위아래가 아이보리로 남는다
+#   카드      9/16  가로 16:9 카드. 화면 가운데에 놓인다
+_ART_RATIO = {LAYOUT_SCROLL: 3 / 2, LAYOUT_CARD: 9 / 16}
+
+
+def layout() -> str:
+    """`카드` 또는 `두루마리`. 모르는 값이면 카드로 본다."""
+    v = str(get("compose.layout", LAYOUT_CARD) or LAYOUT_CARD).strip()
+    return v if v in _ART_RATIO else LAYOUT_CARD
+
+
+def art_ratio(name: str = "") -> float:
+    """그림칸 비율. ★ **`s5_artspec` 과 `s7_compose` 가 같이 이것을 부른다.**
+
+    예전에는 두 파일이 각자 `ART_RATIO = 3/2` 를 들고 있었고 「같은 값이어야
+    한다」는 주석만 있었다. 어긋나면 두루마리 칸이 카메라 걸음과 안 맞아
+    **첫 칸과 마지막 칸이 잘리는데, 오류도 경고도 안 났다.** 한 곳에서 준다.
+    """
+    return _ART_RATIO[name if name in _ART_RATIO else layout()]
+
+
+def card_rect() -> Dict[str, int]:
+    """카드 배치의 16:9 칸. 실측한 레퍼런스 좌표에서 나온 값이다.
+
+        x = margin,  y = top,  w = width - 2*margin,  h = round(w * 9/16)
+
+    폭에서 높이를 **계산한다** — 둘을 따로 적으면 16:9 가 아니게 되고,
+    그러면 넣은 그림이 늘거나 잘린다.
+    """
+    c = get("compose", {}) or {}
+    cd = c.get("card") or {}
+    width = int(c.get("width", 1080))
+    margin = int(cd.get("margin", 54))
+    w = width - 2 * margin
+    return {"x": margin, "y": int(cd.get("top", 816)), "w": w,
+            "h": int(round(w * _ART_RATIO[LAYOUT_CARD])),
+            "radius": int(cd.get("radius", 30)),
+            "para_top": int(cd.get("para_top", 1404))}
 
 
 def seconds_range() -> tuple[float, float]:

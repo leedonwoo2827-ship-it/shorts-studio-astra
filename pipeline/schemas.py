@@ -18,6 +18,13 @@ from typing import Any, Dict
 HOOK_MAX = 16
 # 자막 한 씬 상한. 30초/3컷이면 씬당 66자인데, 여유를 두고 90자에서 끊는다.
 SRT_MAX = 90
+# 카드 배치의 꼭지 머리 상한. 레퍼런스 실측: 제목은 「받아쓰기 · STT」
+# 「코딩 — 갈립니다」처럼 열 자 안쪽이었고, 배지는 「신규 · 지난달 대비」,
+# 캡션은 「Fable 5.1 / GPT-6 Astra」 꼴이었다.
+# 제목이 길어지면 theme.css 가 `--titlelen` 으로 글자를 줄인다 — 잘리지 않는다.
+CARD_TITLE_MAX = 16
+CARD_BADGE_MAX = 20
+CARD_SUB_MAX = 40
 
 
 DRAFT_SCHEMA: Dict[str, Any] = {
@@ -85,6 +92,15 @@ SCRIPT_SCHEMA: Dict[str, Any] = {
                     # 구조.json 의 `facts[].id`. 이 씬이 어느 사실을 쓰는지 못 박는다 —
                     # 장면 지시가 그 사실의 값·단위·표를 받아서 claim 을 세운다.
                     "fact": {"type": "string", "maxLength": 24},
+                    # ── 카드 배치의 꼭지 머리 (전부 선택) ────────────────
+                    # ★ **선택이다.** 없으면 `s7_compose` 가 제목을 `hook_line1`
+                    #   로 물러서고 배지·캡션은 아예 안 그린다. 서사형 프롬프트는
+                    #   이 칸을 안 쓰므로 지금까지 쓴 대본이 그대로 통과한다.
+                    # ★ `additionalProperties: False` 라서, 프롬프트가 이 이름을
+                    #   내려면 **여기 있어야 한다.** 없으면 검증에서 죽는다.
+                    "card_title": {"type": "string", "maxLength": CARD_TITLE_MAX},
+                    "card_badge": {"type": "string", "maxLength": CARD_BADGE_MAX},
+                    "card_sub": {"type": "string", "maxLength": CARD_SUB_MAX},
                 },
             },
         },

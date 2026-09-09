@@ -34,9 +34,61 @@ from core.atomic_io import atomic_write_json
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# 확장자 → 움직이는가. 컴포지션이 이것을 보고 심는 방식을 고른다.
-ANIMATED = (".svg",)
-STILL = (".png", ".jpg", ".jpeg", ".webp")
+# 확장자 → 어떻게 심는가. 컴포지션이 이것을 보고 고른다.
+ANIMATED = (".svg",)                        # 코드로 쓴 애니메이션 — 문서에 인라인한다
+VIDEO = (".mp4", ".webm")                   # 영상 — <video> 로 넣고 시계를 맞춘다
+STILL = (".png", ".jpg", ".jpeg", ".webp")  # 정지 그림 — 배경으로 깐다
+# ★ 우선순위 **순서 그대로**다. 같은 자리에 여러 확장자가 있으면 앞의 것이 이긴다.
+#   `.svg` 가 `.png` 를 이기는 기존 규칙(움직이는 쪽이 이긴다)이 그대로 살아 있고,
+#   영상이 그 위에 온다.
+MEDIA = VIDEO + ANIMATED + STILL
+
+
+def kind(name: str) -> str:
+    """`video` · `svg` · `still` 중 하나. 컴포지션이 심는 방식을 고르는 데 쓴다."""
+    ext = Path(name).suffix.lower()
+    if ext in VIDEO:
+        return "video"
+    if ext in ANIMATED:
+        return "svg"
+    return "still"
+
+
+def parse_name(stem: str) -> Optional[tuple]:
+    """`001-2-03` → `(씬 1, 조각 2, 프레임 3, 프레임번호가_있었나)`. 아니면 `None`.
+
+    ★ **앞 세 자리가 씬**이라는 기존 규칙은 그대로다. 그 뒤에 붙는 것을 이렇게 읽는다:
+
+        001.png          씬1 · 조각1 · 프레임1 (암묵)
+        001-2.png        씬1 · 조각2 · 프레임1 (암묵)  ← 조각 경계에서 갈린다 = 컷
+        001-2-03.png     씬1 · 조각2 · 프레임3 (명시)  ← 조각 안 플립북
+        001-교회.svg     씬1 · 조각1 · 프레임1 (암묵)  ← 설명은 무시 (여태 돌던 방식)
+        001-2-교회.png   씬1 · 조각2 · 프레임1 (암묵)
+
+    숫자 토막만 조각·프레임으로 읽고, 숫자가 아닌 것이 나오면 거기부터는 사람이
+    붙인 설명이다. 그래서 예전 이름이 그대로 돈다 — 손으로 넣던 파일을 안 깬다.
+
+    ★ 네 번째 값이 **프레임 번호를 실제로 적었는가**다. `001-2.png` 와
+      `001-2-01.png` 이 한 폴더에 같이 있으면 둘 다 「조각 2 의 첫 프레임」을
+      노리는데, 뭘 고를지 정해져 있지 않으면 **정렬 순서가 정한다** — 즉
+      아무도 모르게 한 프레임이 가려진다. `present_many` 가 이 값을 보고
+      **명시된 쪽을 살리고 암묵 한 장은 버린다.**
+    """
+    if len(stem) < 3 or not stem[:3].isdigit():
+        return None
+    no = int(stem[:3])
+    tail = stem[3:]
+    nums: List[int] = []
+    if tail.startswith("-"):
+        for part in tail.split("-")[1:]:
+            if part.isdigit() and len(nums) < 2:
+                nums.append(int(part))
+            else:
+                break
+    cue = nums[0] if nums else 1
+    explicit = len(nums) > 1
+    frame = nums[1] if explicit else 1
+    return no, max(1, cue), max(1, frame), explicit
 
 
 def _snap(beats: List[Dict[str, Any]], cues: List[Dict[str, Any]],
@@ -103,6 +155,47 @@ def present(slug: str) -> Dict[int, str]:
         if cur is None or (ext in ANIMATED and Path(cur).suffix.lower() in STILL):
             out[no] = p.name
     return out
+
+
+def present_many(slug: str) -> Dict[int, List[Dict[str, Any]]]:
+    """씬마다 **조각 목록**, 조각마다 **프레임 목록**.
+
+        {1: [{"m": 1, "frames": ["001-1.png"]},
+             {"m": 2, "frames": ["001-2-01.png", "001-2-02.png"]}], …}
+
+    ★ **씬에 그림이 몇 장인지 정해져 있지 않다.** 0장일 수도, 조각마다 한 장일
+      수도, 한 조각 안에서 GIF 처럼 넘어갈 수도 있다. 그래서 `present()` 처럼
+      씬당 하나로 접지 않고 목록으로 준다.
+
+    ★ `present()` 는 **지우지 않는다.** 두루마리 배치가 그것을 쓴다 — 그 배치는
+      씬 하나가 두루마리 한 장이라 정말로 씬당 한 파일이다.
+    """
+    # {씬: {조각: {명시여부: {프레임: 파일}}}}
+    out: Dict[int, Dict[int, Dict[bool, Dict[int, str]]]] = {}
+    d = paths.art_dir(slug)
+    if not d.exists():
+        return {}
+    for p in sorted(d.iterdir()):
+        if not p.is_file() or p.suffix.lower() not in MEDIA:
+            continue
+        got = parse_name(p.stem)
+        if not got:
+            continue
+        no, cue, frame, explicit = got
+        slot = out.setdefault(no, {}).setdefault(cue, {}).setdefault(explicit, {})
+        cur = slot.get(frame)
+        # 우선순위: MEDIA 의 순서. 앞에 있는 확장자가 이긴다.
+        if cur is None or MEDIA.index(p.suffix.lower()) < MEDIA.index(Path(cur).suffix.lower()):
+            slot[frame] = p.name
+
+    def frames_of(byexp: Dict[bool, Dict[int, str]]) -> List[str]:
+        # ★ 명시된 프레임이 하나라도 있으면 **그쪽만** 쓴다. 섞으면 암묵 한 장이
+        #   플립북의 첫 프레임 자리를 조용히 차지한다.
+        fr = byexp.get(True) or byexp.get(False) or {}
+        return [fr[k] for k in sorted(fr)]
+
+    return {no: [{"m": m, "frames": frames_of(cues[m])} for m in sorted(cues)]
+            for no, cues in sorted(out.items())}
 
 
 def is_animated(name: str) -> bool:

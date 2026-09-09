@@ -34,8 +34,12 @@ ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE_DIR = ROOT / "templates" / "shorts_9x16"
 FONTS = ROOT / "static" / "fonts"
 
-# 그림 원본 비율. 백엔드가 주는 세로 판이 2:3 이다.
-ART_RATIO = 3 / 2
+# 그림 비율은 **배치가 정한다** — `core.config.art_ratio` 한 곳에서 받는다.
+#   두루마리  3/2   세로 판 (폭 1080 → 칸 높이 1620)
+#   카드      9/16  가로 16:9 카드 (972 x 547)
+# 예전에는 이 파일과 `s5_artspec` 이 각자 `3/2` 를 들고 있었고, 어긋나면
+# 조용히 칸이 잘렸다. 상수는 두루마리용 뒷호환 이름으로만 남긴다.
+ART_RATIO = config.art_ratio(config.LAYOUT_SCROLL)
 
 
 def _esc(s: str) -> str:
@@ -324,6 +328,83 @@ def _mark_numbers(esc: str) -> str:
     return _NUM_RUN.sub(lambda m: f"<em>{m.group(0)}</em>", esc)
 
 
+# 꼭지 로고를 넣는 자리. 여기에 `001.png` 을 넣으면 씬 1 의 카드 머리에 105px
+# 정사각으로 뜬다. 없으면 그 줄을 아예 안 그린다.
+LOGO_DIR = "_아이콘"
+_LOGO_EXT = (".png", ".webp", ".jpg", ".jpeg", ".svg")
+
+
+def _card_logos(slug: str) -> Dict[int, str]:
+    """`04_장면/_아이콘/NNN.*` → {씬: 파일 경로}. 없으면 빈 딕트.
+
+    ★ 씬 그림과 **다른 폴더**에 둔다. 같은 폴더에 두면 `present_many` 가
+      `001.png` 을 조각 그림으로 집어 가운데 카드에 로고를 깔아 버린다.
+    """
+    d = paths.art_dir(slug) / LOGO_DIR
+    if not d.exists():
+        return {}
+    out: Dict[int, str] = {}
+    for p in sorted(d.iterdir()):
+        if not p.is_file() or p.suffix.lower() not in _LOGO_EXT:
+            continue
+        head = p.stem[:3]
+        if head.isdigit():
+            out.setdefault(int(head), p.name)
+    return out
+
+
+def _card_shots(cue_list: List[Dict[str, Any]], media: List[Dict[str, Any]],
+                start: float, flip_fps: int) -> List[Dict[str, Any]]:
+    """카드 배치의 그림 겹. **조각 하나에 겹 하나, 겹 안에 프레임 여럿.**
+
+        조각 1  001-1.png                     정지 그림 한 장 + 켄번스
+        조각 2  001-2-01.png … -03.png        GIF 처럼 넘어가는 플립북
+        조각 3  (없음)                         앞 겹이 그대로 남는다
+
+    ★ **씬에 그림이 몇 장인지 정해져 있지 않다.** 조각 수와 그림 수가 맞을
+      이유가 없다 — FlowGenie 를 열 장 돌렸는데 여덟 장만 받아 왔을 수도 있다.
+      없는 조각은 **겹을 만들지 않는다.** 그러면 앞 겹이 계속 보이고, 첫 조각부터
+      없으면 그림칸이 빈 채로(사선 무늬) 남는다. 둘 다 사람이 보면 아는 상태다.
+
+    ★ **플립북은 한 번 넘기고 마지막 프레임에서 멈춘다.** 되풀이시키면
+      `repeatCount="indefinite"` 때 겪은 「8초 내내 안절부절」이 그대로 돌아온다.
+
+    ★ **프레임을 자르지 않는다.** `flip_fps` 로 다 못 넘기면 조각 안에 들어가게
+      간격을 좁힌다. 뒤를 잘라 버리면 움직임의 **끝**이 사라지는데, 끝이
+      그 움직임의 뜻인 경우가 많다.
+    """
+    by_m = {int(x.get("m") or 0): (x.get("frames") or []) for x in (media or [])}
+    step_want = 1.0 / max(1, int(flip_fps))
+    shots: List[Dict[str, Any]] = []
+    n_cues = len(cue_list or [])
+    # ★ **조각보다 뒤에 붙은 그림은 화면에 안 나온다.** 조각이 2개인데 `001-3.png`
+    #   을 넣으면 그 파일은 갈 자리가 없다 — 자막을 줄여 조각이 줄었을 때 실제로
+    #   생긴다. 조용히 버리면 사람은 「넣었는데 안 보인다」만 겪는다. 되돌려 준다.
+    orphan = sorted(m for m in by_m if m > n_cues or m < 1)
+    for i, cue in enumerate(cue_list or [], start=1):
+        frames = by_m.get(i)
+        if not frames:
+            continue
+        at = round(start + float(cue.get("t") or 0.0), 3)
+        d = float(cue.get("d") or 0.0)
+        n = len(frames)
+        step = step_want if n < 2 else (min(step_want, d / n) if d > 0 else step_want)
+        shots.append({
+            "m": i,
+            "at": at,
+            "kind": s6_art.kind(frames[0]),
+            "file": frames[0],
+            "frames": [{"at": round(at + k * step, 3), "file": f}
+                       for k, f in enumerate(frames)],
+            "step": round(step, 4),
+            # 켄번스는 **프레임이 한 장인 정지 그림에만.** 여러 장이면 넘김이
+            # 이미 동작이고, 둘을 겹치면 두 움직임이 싸워 둘 다 안 읽힌다.
+            "kb": _kenburns(i, max(d, 0.5)) if (n == 1 and s6_art.kind(frames[0]) == "still")
+                  else None,
+        })
+    return shots, orphan
+
+
 def run(slug: str, *, on_log: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
     log = on_log or (lambda _m: None)
     doc = _load(slug)
@@ -338,9 +419,20 @@ def run(slug: str, *, on_log: Optional[Callable[[str], None]] = None) -> Dict[st
     band_top = int(c.get("band_top", 300))
     band_bottom = int(c.get("band_bottom", 320))
     gap = float(config.get("shorts.gap_sec", 0.12))
-    art_h = int(round(width * ART_RATIO))
+
+    # ★ **배치가 기하를 정한다.** 두 벌이 한 템플릿에 산다.
+    #     두루마리  씬 하나가 세로 두루마리, 카메라가 칸을 뛴다 (예전 배치)
+    #     카드      씬 하나가 꼭지 카드, 가운데 16:9 그림이 갈린다 (레퍼런스)
+    layout = config.layout()
+    is_card = layout == config.LAYOUT_CARD
+    art_h = int(round(width * config.art_ratio(config.LAYOUT_SCROLL)))
+    card = config.card_rect()
+    flip_fps = max(1, int(config.get("art.flip_fps", 8)))
 
     have_art = s6_art.present(slug)
+    # 카드 배치는 씬당 한 장이 아니라 **조각별·프레임별 목록**이 필요하다.
+    media = s6_art.present_many(slug) if is_card else {}
+    logos = _card_logos(slug) if is_card else {}
 
     # ── 두루마리 카메라 ───────────────────────────────────────────────────
     # 장면 지시가 칸과 카메라를 담고 있다. 카메라 시각은 **씬 기준**이라
@@ -357,6 +449,7 @@ def run(slug: str, *, on_log: Optional[Callable[[str], None]] = None) -> Dict[st
     # ── 타이밍 ────────────────────────────────────────────────────────────
     scenes: List[Dict[str, Any]] = []
     cues: List[Dict[str, Any]] = []
+    orphans: List[Any] = []
     clock = 0.0
     n = len(scenes_in)
     for i, s in enumerate(scenes_in):
@@ -371,32 +464,53 @@ def run(slug: str, *, on_log: Optional[Callable[[str], None]] = None) -> Dict[st
         start = round(clock, 3)
 
         for cue in (s.get("cues") or []):
-            cues.append({"start": round(start + float(cue["t"]), 3),
+            # `no`·`idx` — 카드 배치는 조각을 **씬마다 한 단락**으로 묶어 쌓는다.
+            # 그러려면 이 조각이 어느 씬 것인지 템플릿이 알아야 한다.
+            cues.append({"no": no, "idx": len(cues) + 1,
+                         "start": round(start + float(cue["t"]), 3),
                          "dur": round(float(cue["d"]), 3),
                          "text": _mark_numbers(_esc(cue["text"]))})
 
         r = spec.get(no) or {}
         cells_n = max(1, len(r.get("cells") or []) or 1)
+        role = s.get("role") or "body"
+        card_shots: List[Dict[str, Any]] = []
+        shots: List[Dict[str, Any]] = []
 
-        # ★ 카메라를 **여기서 다시 만든다.** 장면지시에 저장된 것을 쓰지 않는다.
-        #   카메라는 자막 큐 경계에서 나오는 결정론 값이라, 사람이 자막을 고치면
-        #   큐가 바뀌고 저장된 카메라는 그 순간 낡는다. 다시 계산하면 **자막만
-        #   고쳐도 컷이 따라오고**, 장면 지시($)를 다시 돌릴 이유가 없어진다.
-        #   칸 그림(`cells`)만 모델의 것이고 타이밍은 전부 코드의 것이다.
-        from .s5_artspec import make_camera
-        shots = []
-        for x in make_camera(s.get("cues") or [], cells_n, audio_sec):
-            at = float(x.get("at") or 0.0)
-            if at > audio_sec + 0.01:
-                continue                  # 소리보다 늦은 컷은 안 보인다
-            cell = max(1, min(cells_n, int(x.get("cell") or 1)))
-            shots.append({"at": round(start + at, 3),
-                          "y": -(cell - 1) * art_h,
-                          "move": str(x.get("move") or "뛰기")})
+        if is_card:
+            # ★ **카드 배치엔 카메라가 없다.** 컷은 카메라가 칸을 뛰는 것이 아니라
+            #   **가운데 그림을 갈아 끼우는 것**이다. 그래서 칸은 언제나 하나고,
+            #   갈리는 시각은 여기서도 **자막 조각 경계**다 — 자막과 그림이 같은
+            #   순간에 튄다는 원칙은 배치가 바뀌어도 그대로다.
+            cells_n = 1
+            card_shots, orphan = _card_shots(s.get("cues") or [],
+                                             media.get(no) or [], start, flip_fps)
+            if orphan:
+                orphans.append((no, orphan, len(s.get("cues") or [])))
+        else:
+            # ★ 카메라를 **여기서 다시 만든다.** 장면지시에 저장된 것을 쓰지 않는다.
+            #   카메라는 자막 큐 경계에서 나오는 결정론 값이라, 사람이 자막을 고치면
+            #   큐가 바뀌고 저장된 카메라는 그 순간 낡는다. 다시 계산하면 **자막만
+            #   고쳐도 컷이 따라오고**, 장면 지시($)를 다시 돌릴 이유가 없어진다.
+            #   칸 그림(`cells`)만 모델의 것이고 타이밍은 전부 코드의 것이다.
+            from .s5_artspec import make_camera
+            for x in make_camera(s.get("cues") or [], cells_n, audio_sec):
+                at = float(x.get("at") or 0.0)
+                if at > audio_sec + 0.01:
+                    continue              # 소리보다 늦은 컷은 안 보인다
+                cell = max(1, min(cells_n, int(x.get("cell") or 1)))
+                shots.append({"at": round(start + at, 3),
+                              "y": -(cell - 1) * art_h,
+                              "move": str(x.get("move") or "뛰기")})
+
         animated = bool(have_art.get(no) and s6_art.is_animated(have_art[no]))
+        # 켄번스·강조 도형은 **두루마리 배치의 칸 하나짜리 정지 그림에만.**
+        # 카드 배치에서는 켄번스가 겹마다 붙는다(`_card_shots`) — 그림이 갈리는데
+        # 씬 전체에 하나만 걸면 갈린 뒤로는 엉뚱한 확대가 남는다.
+        plain_still = (not is_card) and cells_n == 1 and not animated
         scenes.append({
             "no": no,
-            "role": s.get("role") or "body",
+            "role": role,
             "start": start,
             "dur": dur,
             "audio_sec": round(audio_sec, 3),
@@ -407,12 +521,22 @@ def run(slug: str, *, on_log: Optional[Callable[[str], None]] = None) -> Dict[st
             "cells_n": cells_n,
             "cam_h": art_h * cells_n,
             "camera": shots,
-            # 켄번스는 **칸이 하나인 정지 그림에만** 남긴다. 두루마리는 카메라가
-            # 이미 움직이므로 둘을 겹치면 두 움직임이 싸워 둘 다 안 읽힌다.
-            "kb": _kenburns(i, dur) if (cells_n == 1 and not animated) else None,
-            "accent": _accent(i, s.get("role") or "body", start, dur,
+            "kb": _kenburns(i, dur) if plain_still else None,
+            "accent": _accent(i, role, start, dur,
                               width, height, band_top, band_bottom)
-                      if (cells_n == 1 and not animated) else None,
+                      if plain_still else None,
+            # ── 카드 배치 ────────────────────────────────────────────────
+            "shots": card_shots,
+            # 큰 꼭지 제목. `card_title` 이 없으면 `hook_line1` 로 물러선다 —
+            # 목록형에서 그 칸이 이미 「항목 이름」이라 뜻이 같다.
+            "card_title": _esc(s.get("card_title") or s.get("hook_line1") or ""),
+            "card_badge": _esc(s.get("card_badge") or ""),
+            "card_sub": _esc(s.get("card_sub") or ""),
+            "card_logo": logos.get(no),
+            # 첫 씬(`role=hook`)은 **표지 배치**로 굽는다. 고정 후크가 여기에 크게
+            # 뜨고, 본문 카드에는 꼭지 제목만 있다 — 레퍼런스가 그 꼴이었다.
+            "is_cover": bool(is_card and role == "hook"),
+            "cue_n": len(s.get("cues") or []),
         })
         clock += dur
 
@@ -445,7 +569,34 @@ def run(slug: str, *, on_log: Optional[Callable[[str], None]] = None) -> Dict[st
     #   `<img src="x.svg">` 로 넣으면 브라우저가 SVG 를 그림으로만 취급해
     #   **SMIL 애니메이션이 돌지 않는다**(실측). 인라인이어야 움직인다.
     #   정지 그림은 그대로 파일로 두고 배경으로 깐다.
-    for sc in scenes:
+    art_n = 0
+    for sc in (scenes if is_card else []):
+        # 카드 배치 — 조각별·프레임별로 다 옮긴다. 인라인이 필요한 것은 `.svg` 뿐이다.
+        for sh in sc["shots"]:
+            if sh["kind"] == "svg":
+                src = paths.art_dir(slug) / sh["file"]
+                # 접두어에 조각 번호까지 넣는다 — 한 씬에 SVG 가 둘 이상 오면
+                # 씬 접두어만으로는 여전히 id 가 겹친다(그때 뒤 것이 통째로 빈다).
+                sh["svg"], _n = _inline_svg(src, prefix=f"s{sc['no']:02d}c{sh['m']:02d}-")
+                sh["svg"], _ph = phase_svg(sh["svg"], sh["at"])
+                art_n += 1
+                continue
+            for fr in sh["frames"]:
+                src = paths.art_dir(slug) / fr["file"]
+                if src.exists():
+                    shutil.copy2(src, out / "assets" / fr["file"])
+                    art_n += 1
+    logo_n = 0
+    for sc in (scenes if is_card else []):
+        if sc["card_logo"]:
+            src = paths.art_dir(slug) / LOGO_DIR / sc["card_logo"]
+            if src.exists():
+                shutil.copy2(src, out / "assets" / sc["card_logo"])
+                logo_n += 1
+            else:
+                sc["card_logo"] = None
+
+    for sc in ([] if is_card else scenes):
         name = sc["art"]
         if not name:
             continue
@@ -500,6 +651,16 @@ def run(slug: str, *, on_log: Optional[Callable[[str], None]] = None) -> Dict[st
         for i, sc in enumerate(scenes):
             sc["num"] = _CIRCLED[i] if i < len(_CIRCLED) else ""
 
+    # 카드 배치의 좌상단 라벨. 설정이 비면 고정 후크 둘째 줄이 그 일을 한다 —
+    # 표지가 지나간 뒤에도 「무슨 영상인지」가 화면에 남아 있어야 한다.
+    series_label = _esc(str(c.get("series_label") or "").strip()
+                        or (str(hf.get("line2") or "").strip() if is_card else ""))
+    brand = _esc(str(c.get("brand") or "").strip())
+    # 표지가 지나간 시각. 레퍼런스는 표지에 라벨도 레일도 없었다 —
+    # 표지는 후크만 지고, 진행 표시는 본문부터다.
+    body_start = next((sc["start"] for sc in scenes if not sc["is_cover"]), 0.0)
+    close_comment = _esc(str(c.get("close_comment") or "").strip())
+
     screen_text = "".join(
         [str(doc.get("title") or ""), " ".join(doc.get("hashtags") or [])]
         + [s["hook_line1"] + s["hook_line2"] for s in scenes]
@@ -508,6 +669,11 @@ def run(slug: str, *, on_log: Optional[Callable[[str], None]] = None) -> Dict[st
         #   맑은고딕으로 떨어져 화면에서 홀로 다른 폰트가 된다.
         + ([fixed["line1"] + fixed["pre"] + fixed["mark"] + fixed["post"],
             _CIRCLED] if fixed else [])
+        # ★ 카드 배치의 새 글자도 전부 더한다 — 꼭지 제목·배지·모델명 줄·
+        #   시리즈 라벨·브랜드·마무리 코멘트. 같은 실수를 배치가 바뀔 때마다
+        #   되풀이하지 않으려고 여기 한 줄에 모아 둔다.
+        + [s["card_title"] + s["card_badge"] + s["card_sub"] for s in scenes]
+        + [series_label, brand, close_comment]
     )
     _subset_fonts(out / "assets" / "fonts", screen_text, on_log=log)
 
@@ -525,21 +691,59 @@ def run(slug: str, *, on_log: Optional[Callable[[str], None]] = None) -> Dict[st
         scenes=scenes, cues=cues,
         hook_fixed=fixed,
         hashtags=_esc("  ".join(doc.get("hashtags") or [])),
+        # ★ `StrictUndefined` 다 — 템플릿이 쓰는 이름은 **전부** 여기 있어야 한다.
+        #   빠지면 렌더가 예외로 죽는다(조용히 비는 것보다 낫다).
+        layout=layout, is_card=is_card, card=card, flip_fps=flip_fps,
+        series_label=series_label, brand=brand, close_comment=close_comment,
+        body_start=round(body_start, 3),
     )
     (out / "index.html").write_text(html, encoding="utf-8", newline="\n")
 
     # ★ 씬 시각을 파일로 남긴다 — 스토리보드가 씬마다 **최종 화면**을 한 장씩 찍을 때
     #   쓴다. 계산은 여기 한 곳에만 둔다. 찍는 쪽에서 다시 세면 언젠가 서로 달라지고,
     #   그때 슬라이드가 엉뚱한 순간을 보여 준다.
+    #   ★ 카드 배치는 **조각마다** 그림이 갈리므로 씬 중간 한 컷만 찍으면 나머지
+    #     그림을 사람이 못 본다. 그래서 겹의 시각을 같이 남긴다. 플립북은
+    #     프레임마다가 아니라 **겹당 한 장**만 찍는다(`frames` 는 장수만 알려 준다) —
+    #     12프레임을 12장 찍으면 스토리보드 띠가 터진다.
     atomic_write_json(str(out / "장면시각.json"), {
         "total": total,
-        "scenes": [{"no": sc["no"], "start": sc["start"], "dur": sc["dur"]}
+        "layout": layout,
+        "scenes": [{"no": sc["no"], "start": sc["start"], "dur": sc["dur"],
+                    "shots": [{"m": sh["m"], "at": sh["at"],
+                               "frames": len(sh["frames"]),
+                               "hold": round(sh["at"] + sh["step"] * max(0, len(sh["frames"]) - 1), 3)}
+                              for sh in sc["shots"]]}
                    for sc in scenes],
     }, indent=2)
 
-    cuts_n = sum(len(sc.get("camera") or []) for sc in scenes)
-    log(f"  씬 {len(scenes)} · 두루마리 칸 {sum(sc['cells_n'] for sc in scenes)} · "
-        f"컷 {cuts_n} · 자막 큐 {len(cues)} · 소리 {audio_n} · 총 {total:.2f}초")
+    if is_card:
+        shot_n = sum(len(sc["shots"]) for sc in scenes)
+        frame_n = sum(len(sh["frames"]) for sc in scenes for sh in sc["shots"])
+        flip_n = sum(1 for sc in scenes for sh in sc["shots"] if len(sh["frames"]) > 1)
+        blank = [sc["no"] for sc in scenes if not sc["shots"]]
+        log(f"  배치 카드 · 씬 {len(scenes)} · 그림 겹 {shot_n}(= 컷 {shot_n}) · "
+            f"프레임 {frame_n} · 플립북 {flip_n} · 로고 {logo_n} · "
+            f"자막 큐 {len(cues)} · 소리 {audio_n} · 총 {total:.2f}초")
+        if blank:
+            log(f"  ⚠ 씬 {blank} 은 그림이 **한 장도 없습니다** — 「장면」 탭에서 "
+                f"FlowGenie JSON 을 내보내 그리거나 자리표시로 채우세요.")
+        # 조각 수보다 그림이 적은 씬. 앞 그림이 계속 보이므로 죽지는 않지만,
+        # **컷이 그만큼 줄어든다** — 이 앱이 재려는 값이 컷 수라서 알려야 한다.
+        thin = [f"{sc['no']}({len(sc['shots'])}/{sc['cue_n']})" for sc in scenes
+                if sc["shots"] and len(sc["shots"]) < sc["cue_n"]]
+        if thin:
+            log(f"  씬 {', '.join(thin)} 은 조각보다 그림이 적습니다 "
+                f"(그림/조각) — 없는 조각은 앞 그림을 그대로 듭니다.")
+        for no, ms, n_cue in orphans:
+            log(f"  ⚠ 씬 {no}: 조각 {ms} 번 그림은 **화면에 안 나옵니다** — "
+                f"이 씬의 자막 조각은 {n_cue}개입니다. 파일 이름의 조각 번호를 "
+                f"{1}~{n_cue} 안으로 맞추세요.")
+    else:
+        cuts_n = sum(len(sc.get("camera") or []) for sc in scenes)
+        log(f"  배치 두루마리 · 씬 {len(scenes)} · 칸 "
+            f"{sum(sc['cells_n'] for sc in scenes)} · 컷 {cuts_n} · "
+            f"자막 큐 {len(cues)} · 소리 {audio_n} · 총 {total:.2f}초")
     if fixed:
         log(f"  고정 후크 「{hf.get('line1')} / {hf.get('line2', '')}」"
             + (f" · 강조 「{hf['mark']}」" if hf.get("mark") else " · 둘째 줄 전체"))

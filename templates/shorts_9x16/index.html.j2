@@ -10,6 +10,13 @@
 
   ★ 자막 큐는 **루트 직속**이다. 씬 clip 안에 두면 씬이 사라질 때 같이 사라져
     마지막 큐가 잘린다.
+
+  ★ **배치가 두 벌 산다** (`is_card`). 시간 계산과 DOM 골격은 공유하고, 그림칸·
+    자막·레일만 갈린다.
+      카드      씬 = 꼭지 카드. 가운데 16:9 그림이 **갈리는 것이 컷**이고,
+                자막은 **단락으로 쌓인다.** 첫 씬은 표지로 굽는다.
+      두루마리  씬 = 세로 두루마리. 카메라가 **칸을 뛰는 것이 컷**이고,
+                자막 조각은 떴다 꺼진다. (예전 배치 — 지우지 않았다)
 -#}
 <!doctype html>
 <html lang="ko">
@@ -46,6 +53,13 @@
         --artH: {{ art_h }}px;
         --bandTop: {{ band_top }}px;
         --bandBot: {{ band_bottom }}px;
+        /* 카드 배치의 16:9 칸 — 높이는 폭에서 계산해 넘어온다(config.card_rect) */
+        --cardX: {{ card.x }}px;
+        --cardY: {{ card.y }}px;
+        --cardW: {{ card.w }}px;
+        --cardH: {{ card.h }}px;
+        --cardR: {{ card.radius }}px;
+        --paraTop: {{ card.para_top }}px;
         --ivory: {{ ivory }};
         --ink: {{ ink }};
         --accent: {{ accent }};
@@ -56,7 +70,9 @@
 {{ theme_css }}
     </style>
   </head>
-  <body>
+  {#- 배치를 몸통에 박는다. CSS 는 이 클래스로만 갈린다 —
+        선택자를 씬마다 갈라 쓰면 어느 규칙이 사는지 알 수 없게 된다. -#}
+  <body class="{{ 'lay-card' if is_card else 'lay-scroll' }}">
     <div
       id="root"
       data-composition-id="main"
@@ -68,7 +84,10 @@
     >
 {% for sc in scenes %}
       {#- 씬 {{ sc.no }} · {{ sc.role }} · {{ sc.start }}s +{{ sc.dur }}s -#}
-      <section id="sc{{ '%03d' % sc.no }}" class="clip scene"
+      {#- `cover` 는 표지 씬 표시다. 카드를 화면 가운데로 내리는 데 쓴다 —
+            표지에는 꼭지 머리가 없어서 위가 후크 자리로 통째로 비기 때문이다. -#}
+      <section id="sc{{ '%03d' % sc.no }}"
+               class="clip scene{{ ' cover' if sc.is_cover }}"
                data-start="{{ sc.start }}" data-duration="{{ sc.dur }}">
         {#- 그림칸. 세 갈래다.
               움직이는 장면  인라인 SVG. `<img src=".svg">` 로 넣으면 브라우저가
@@ -79,6 +98,55 @@
               칸에서 칸으로 **끊어 뛴다.** 뛰는 것이 컷이다.
               판을 SVG 밖에 두는 이유: 아스트라가 정지 그림을 줘도 화면은
               여전히 움직이고, 자리표시(무료)로도 리듬을 시험할 수 있다. -#}
+        {%- if is_card %}
+        {#- 카드 배치 — 겹을 쌓아 두고 조각 시각에 겹쳐 넘긴다.
+              겹 하나 = 조각 하나 = 컷 하나.
+              겹 안의 `.fr` 이 여러 장이면 GIF 처럼 딱딱 갈아 끼운다(플립북).
+              겹이 0개면 `.art.empty` — 자리는 지킨다. -#}
+        {%- if sc.shots %}
+        <div id="art{{ '%03d' % sc.no }}" class="art card">
+          {%- for sh in sc.shots %}
+          <div id="sh{{ '%03d' % sc.no }}_{{ sh.m }}" class="shot k-{{ sh.kind }}">
+            {%- if sh.kind == 'svg' %}
+            {{ sh.svg }}
+            {%- elif sh.kind == 'video' %}
+            {#- 영상은 시계를 GSAP 에 묶는다(아래 syncMedia). 소리는 내레이션이
+                  따로 있으므로 muted 다 — 안 그러면 두 소리가 겹친다. -#}
+            <video id="vd{{ '%03d' % sc.no }}_{{ sh.m }}" class="fr"
+                   src="./assets/{{ sh.file }}" muted preload="auto"
+                   data-at="{{ sh.at }}"></video>
+            {%- else %}
+            {%- for fr in sh.frames %}
+            <div id="fr{{ '%03d' % sc.no }}_{{ sh.m }}_{{ loop.index }}" class="fr"
+                 style="background-image:url('./assets/{{ fr.file }}')"></div>
+            {%- endfor %}
+            {%- endif %}
+          </div>
+          {%- endfor %}
+        </div>
+        {%- else %}
+        <div id="art{{ '%03d' % sc.no }}" class="art card empty"></div>
+        {%- endif %}
+
+        {#- 꼭지 머리. 표지 씬(`role=hook`)에는 안 올린다 — 거기는 고정 후크가 진다.
+              값이 없는 줄은 **아예 내지 않는다.** 빈 칸을 두면 그만큼 카드가
+              위로 떠서 씬마다 그림 위치가 흔들린다. -#}
+        {%- if not sc.is_cover %}
+        <div class="cardhead" id="ch{{ '%03d' % sc.no }}"
+             style="--titlelen: {{ [sc.card_title|length, 6]|max }}">
+          <div class="cardtitle">{{ sc.card_title }}</div>
+          {%- if sc.card_badge %}
+          <div class="cardbadge">{{ sc.card_badge }}</div>
+          {%- endif %}
+          {%- if sc.card_logo %}
+          <img class="cardlogo" src="./assets/{{ sc.card_logo }}" alt="" />
+          {%- endif %}
+          {%- if sc.card_sub %}
+          <div class="cardsub">{{ sc.card_sub }}</div>
+          {%- endif %}
+        </div>
+        {%- endif %}
+        {%- else %}
         {%- if sc.animated %}
         <div id="art{{ '%03d' % sc.no }}" class="art live">
           <div id="cam{{ '%03d' % sc.no }}" class="cam"
@@ -92,8 +160,11 @@
         {%- else %}
         <div id="art{{ '%03d' % sc.no }}" class="art empty"></div>
         {%- endif %}
+        {#- 띠 그러데이션 — 두루마리는 그림이 화면을 꽉 채워 띠에 걸치므로 필요하다.
+              카드 배치에는 그림이 제 칸 안에만 있어서 가릴 것이 없다. -#}
         <div class="veil veil-top"></div>
         <div class="veil veil-bot"></div>
+        {%- endif %}
 
         {#- 강조 도형은 **정지 그림에만** 얹는다.
               움직이는 장면 위에 또 고리를 그으면 두 움직임이 싸워서 둘 다 안 읽힌다
@@ -120,6 +191,9 @@
               고정 후크가 있으면 이 씬에는 **항목 번호만** 뜬다 — 영상 내내
                 바뀌지 않는 후크가 루트에 따로 있다.
               없으면 예전처럼 씬마다 두 줄이 갈린다(서사형). -#}
+        {#- 카드 배치에는 이 자리가 없다. 후크는 표지 씬이 지고, 진행은 통짜 레일이
+              말한다 — 항목 번호 ①~⑧ 는 레일과 같은 말을 두 번 하는 것이 된다. -#}
+        {%- if not is_card %}
         {%- if hook_fixed %}
         <div class="num" id="nm{{ '%03d' % sc.no }}">{{ sc.num }}</div>
         {%- else %}
@@ -130,20 +204,68 @@
           <div class="rule" id="ru{{ '%03d' % sc.no }}"></div>
         </div>
         {%- endif %}
+        {%- endif %}
       </section>
 {% endfor %}
 
 {% if hook_fixed %}
-      {#- 고정 후크 — 루트 직속이라 씬이 바뀌어도 그대로 있다.
+      {#- 고정 후크. 두 배치에서 사는 기간이 다르다.
+            두루마리  영상 내내 상단에 박혀 있다 (예전 규칙)
+            카드      **표지 씬 동안만** 크게 뜬다. 본문 카드에는 그 자리가 없고,
+                      대신 좌상단 라벨이 후크 둘째 줄을 계속 진다.
             `mark` 만 강조색이다. 비어 있으면 둘째 줄 전체가 강조색이 된다. -#}
-      <div id="hookfix" class="clip hook hookfix" data-start="0" data-duration="{{ total }}"
+{%- if not is_card or body_start > 0 %}
+      <div id="hookfix" class="clip hook hookfix"
+           data-start="0"
+           data-duration="{{ body_start if is_card else total }}"
            style="--hooklen: {{ [hook_fixed.line1|length, (hook_fixed.pre ~ hook_fixed.mark ~ hook_fixed.post)|length, 1]|max }}">
         <div class="h1 line">{{ hook_fixed.line1 }}</div>
         <div class="h2 line">{{ hook_fixed.pre }}<em>{{ hook_fixed.mark }}</em>{{ hook_fixed.post }}</div>
         <div class="rule" id="rufix"></div>
       </div>
+{%- endif %}
 {% endif %}
 
+{% if is_card %}
+{%- if series_label and body_start < total %}
+      {#- 좌상단 라벨 — 표지가 지나간 뒤 끝까지. 「무슨 영상인지」가 화면에 남는다. -#}
+      <div id="serieslabel" class="clip serieslabel"
+           data-start="{{ body_start }}"
+           data-duration="{{ (total - body_start)|round(3) }}">{{ series_label }}</div>
+{%- endif %}
+{%- if brand and body_start > 0 %}
+      {#- 표지 하단 브랜드. 표지 동안만. -#}
+      <div id="brand" class="clip brand" data-start="0"
+           data-duration="{{ body_start }}">{{ brand }}</div>
+{%- endif %}
+{%- if close_comment %}
+      {#- 마무리 코멘트 한 줄 — 아웃트로 카드를 만들지 않는 대신 마지막 씬에 얹는다. -#}
+      <div id="closecmt" class="clip closecmt"
+           data-start="{{ scenes[-1].start }}"
+           data-duration="{{ scenes[-1].dur }}">{{ close_comment }}</div>
+{%- endif %}
+
+      {#- 진행 레일 — 카드 배치는 **통짜 하나**다. 씬별 칸으로 가르면 꼭지 사이
+            경계가 두 번 말해지고(제목이 이미 갈린다), 레퍼런스도 통짜였다. -#}
+      <div id="rail" class="clip rail one" data-start="{{ body_start }}"
+           data-duration="{{ (total - body_start)|round(3) }}">
+        <span class="seg"><i id="rgall"></i></span>
+      </div>
+
+      {#- 자막 — **씬마다 한 단락**이고 조각이 그 안에 쌓인다.
+            ★ 단락은 **루트 직속**이어야 한다. 씬 clip 안에 넣으면 씬이 사라질 때
+              같이 사라져 마지막 조각이 잘린다(템플릿 머리글의 계약). -#}
+{% for sc in scenes %}
+{%- set scues = cues | selectattr('no', 'equalto', sc.no) | list %}
+{%- if scues %}
+      <div id="pa{{ '%03d' % sc.no }}" class="clip para"
+           data-start="{{ sc.start }}" data-duration="{{ sc.dur }}">
+{%- for cue in scues %}<span class="cc" id="cc{{ '%03d' % cue.idx }}">{{ cue.text }}</span>{{ " " }}
+{%- endfor %}
+      </div>
+{%- endif %}
+{%- endfor %}
+{% else %}
       {#- 진행 레일 — 30초 내내. 칸 하나가 씬 하나다. -#}
       <div id="rail" class="clip rail" data-start="0" data-duration="{{ total }}">
 {%- for sc in scenes %}
@@ -151,14 +273,17 @@
 {%- endfor %}
       </div>
 
-      {#- 자막 큐 — 루트 직속. -#}
+      {#- 자막 큐 — 루트 직속. 떴다 꺼진다. -#}
 {% for cue in cues %}
-      <div id="cc{{ '%03d' % loop.index }}" class="clip cc"
+      <div id="cc{{ '%03d' % cue.idx }}" class="clip cc"
            data-start="{{ cue.start }}" data-duration="{{ cue.dur }}">{{ cue.text }}</div>
 {%- endfor %}
 
 {% if hashtags %}
+      {#- 해시태그 띠 — 카드 배치에서는 안 낸다. 자막 단락이 화면 아래를 끝까지
+            쓰기 때문이다. 태그는 「결과」 단계의 `유튜브.txt` 에 그대로 남는다. -#}
       <div id="tags" class="clip tags" data-start="0" data-duration="{{ total }}">{{ hashtags }}</div>
+{% endif %}
 {% endif %}
 
       {#- 내레이션. id 가 없으면 lint media_missing_id 이고 **소리가 조용히 빠진다**.
@@ -195,7 +320,51 @@
 
 {% for sc in scenes %}
       // ── 씬 {{ sc.no }} ────────────────────────────────────────────────
-      {%- if sc.animated %}
+      {%- if is_card %}
+      // 카드가 들어올 때 짧게 페이드. 켄번스는 **겹마다** 붙는다(아래).
+      tl.from("#art{{ '%03d' % sc.no }}",
+        { autoAlpha: 0, duration: 0.34, ease: "power1.out" }, {{ sc.start }});
+      {%- if not sc.is_cover %}
+      tl.from("#ch{{ '%03d' % sc.no }} > *",
+        { autoAlpha: 0, y: 16, duration: 0.46, stagger: 0.09, ease: "power2.out" },
+        {{ sc.start }});
+      {%- endif %}
+      {%- for sh in sc.shots %}
+      // 겹 {{ sh.m }} — {{ sh.kind }} · 프레임 {{ sh.frames|length }}장 · 간격 {{ sh.step }}초
+      {%- if loop.first %}
+      tl.set("#sh{{ '%03d' % sc.no }}_{{ sh.m }}", { autoAlpha: 1 }, {{ sc.start }});
+      {%- else %}
+      // ★ 겹은 **교차 페이드 0.25초**다. 두루마리의 칸 뛰기는 `tl.set` 으로
+      //   즉시 갈았는데(빈 아이보리가 훑고 지나가서), 카드는 그림이 칸을 꽉
+      //   채우므로 빈 자리가 지나갈 일이 없다 — 짧게 겹치는 편이 덜 튄다.
+      tl.set("#sh{{ '%03d' % sc.no }}_{{ sh.m }}", { autoAlpha: 0 }, {{ sc.start }});
+      tl.to("#sh{{ '%03d' % sc.no }}_{{ sh.m }}",
+        { autoAlpha: 1, duration: 0.25, ease: "power1.out" }, {{ sh.at }});
+      {%- endif %}
+      {%- if sh.kb %}
+      // 켄번스 — **프레임이 한 장인 정지 그림에만.** 여러 장이면 넘김이 이미 동작이다.
+      tl.fromTo("#sh{{ '%03d' % sc.no }}_{{ sh.m }} .fr",
+        { scale: {{ sh.kb.from }}, x: {{ sh.kb.x0 }}, y: {{ sh.kb.y0 }} },
+        { scale: {{ sh.kb.to }}, x: {{ sh.kb.x1 }}, y: {{ sh.kb.y1 }},
+          duration: {{ sc.dur }}, ease: "none" },
+        {{ sh.at }});
+      {%- endif %}
+      {%- if sh.frames|length > 1 %}
+      // ★ 플립북 — **페이드 없이 딱딱 갈아 끼운다.** 겹치면 GIF 처럼 안 보이고
+      //   두 그림이 반투명하게 섞인다. 그리고 **한 번만 넘기고 마지막 프레임에서
+      //   멈춘다** — 되풀이시키면 화면이 씬 내내 안절부절못한다(무한 반복으로
+      //   물린 그 자리와 같다).
+      {%- for fr in sh.frames %}
+      tl.set("#fr{{ '%03d' % sc.no }}_{{ sh.m }}_{{ loop.index }}",
+        { autoAlpha: {{ 1 if loop.first else 0 }} }, {{ sc.start }});
+      {%- if not loop.first %}
+      tl.set("#fr{{ '%03d' % sc.no }}_{{ sh.m }}_{{ loop.index }}", { autoAlpha: 1 }, {{ fr.at }});
+      tl.set("#fr{{ '%03d' % sc.no }}_{{ sh.m }}_{{ loop.index - 1 }}", { autoAlpha: 0 }, {{ fr.at }});
+      {%- endif %}
+      {%- endfor %}
+      {%- endif %}
+      {%- endfor %}
+      {%- elif sc.animated %}
       // ★ 움직이는 장면에는 **켄번스를 걸지 않는다.** 장면이 이미 움직이는데
       //   판까지 밀면 두 움직임이 싸워서 어지럽다. 씬이 뜰 때 짧게 페이드만.
       tl.from("#art{{ '%03d' % sc.no }}",
@@ -213,6 +382,7 @@
         { autoAlpha: 0, duration: 0.34, ease: "power1.out" }, {{ sc.start }});
       {%- endif %}
 
+      {%- if not is_card %}
       {#- 칸 뛰기 — 카메라. 시각은 **자막 큐 경계**다(s5_artspec.make_camera).
             그래서 자막 조각과 화면이 같은 순간에 튄다. 따로 두면 둘 다 죽는다.
             뛰기는 짧고 세게, 좁히기는 같은 칸을 다르게 보여 주는 것이다. -#}
@@ -278,6 +448,7 @@
       tl.fromTo("#rg{{ '%03d' % sc.no }}",
         { scaleX: 0 }, { scaleX: 1, duration: {{ sc.dur }}, ease: "none" },
         {{ sc.start }});
+      {%- endif %}
 {% endfor %}
 
 {% if hook_fixed %}
@@ -288,20 +459,61 @@
       tl.fromTo("#rufix", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "power2.out" }, 0.7);
 {% endif %}
 
+{% if is_card %}
+      // ── 통짜 레일 · 라벨 · 브랜드 · 마무리 코멘트 ──────────────────────
+{%- if total > body_start %}
+      tl.fromTo("#rgall", { scaleX: 0 },
+        { scaleX: 1, duration: {{ (total - body_start)|round(3) }}, ease: "none" },
+        {{ body_start }});
+{%- endif %}
+{%- if series_label and body_start < total %}
+      tl.from("#serieslabel",
+        { autoAlpha: 0, duration: 0.4, ease: "power1.out" }, {{ body_start }});
+{%- endif %}
+{%- if brand and body_start > 0 %}
+      tl.from("#brand", { autoAlpha: 0, duration: 0.5, ease: "power1.out" }, 0.5);
+{%- endif %}
+{%- if close_comment %}
+      tl.from("#closecmt",
+        { autoAlpha: 0, duration: 0.5, ease: "power1.out" }, {{ scenes[-1].start }});
+{%- endif %}
+
+      // ── 자막 — **쌓인다.** ────────────────────────────────────────────
+      // ★ 조각을 **0초에 먼저 꺼 둔다.** `tl.from` 만 쓰면 트윈이 시작되기 전에는
+      //   요소가 제 상태(= 보임)라서, 씬이 뜨는 순간 그 씬의 조각이 **전부 한꺼번에
+      //   보인다.** 두루마리 배치는 조각마다 `.clip` 이 따로라 게이팅이 가려 줬는데,
+      //   카드 배치는 한 단락 안의 `<span>` 이라 게이팅이 개별로 안 걸린다.
+      //   그래서 `fromTo` 로 양 끝을 못 박고, 시작 전 상태도 손으로 끈다.
+{% for cue in cues %}
+      tl.set("#cc{{ '%03d' % cue.idx }}", { autoAlpha: 0 }, 0);
+      tl.fromTo("#cc{{ '%03d' % cue.idx }}", { autoAlpha: 0 },
+        { autoAlpha: 1, duration: 0.30, ease: "power1.out" }, {{ cue.start }});
+{%- endfor %}
+      // ★ **단락은 씬 끝에 끈다.** 조각을 켜기만 하고 끄지 않아서 열 줄이 겹쳐
+      //   뭉갠 일이 있고, 그것이 **구운 mp4 에도 그대로 들어갔다.** `.clip` 의
+      //   data-duration 을 렌더가 지켜 줄 거라 믿으면 안 된다 — 타임라인에 박는다.
+{% for sc in scenes %}
+{%- if sc.cue_n %}
+      tl.set("#pa{{ '%03d' % sc.no }}", { autoAlpha: 1 }, {{ sc.start }});
+      tl.set("#pa{{ '%03d' % sc.no }}", { autoAlpha: 0 }, {{ (sc.start + sc.dur)|round(3) }});
+{%- endif %}
+{%- endfor %}
+{% else %}
       // 자막 큐 — 아래에서 살짝 올라온다
 {% for cue in cues %}
       // ★ 자막은 **움직이지 않는다.** 예전에 26px 올라오게 했더니 2초마다
       //   글자가 튀어올라 화면이 안절부절못했다. 페이드만 준다.
-      tl.from("#cc{{ '%03d' % loop.index }}",
+      tl.from("#cc{{ '%03d' % cue.idx }}",
         { autoAlpha: 0, duration: 0.30, ease: "power1.out" }, {{ cue.start }});
       // ★ **끝나면 끈다.** 켜기만 하고 끄지 않아서 조각이 쌓였다 — 마지막에는 열 줄이
       //   아래 띠에 겹쳐 뭉갰고, 그것이 **구운 mp4 에도 그대로 들어갔다.**
       //   `.clip` 의 data-start/duration 은 렌더가 알아서 지켜 줄 거라 믿었는데
       //   아니었다(실측 2026-09-08: 빌드가 컴포지션 뒤인데도 겹쳤다).
       //   타임라인에 박아야 seek 방식과 무관하게 듣는다.
-      tl.set("#cc{{ '%03d' % loop.index }}", { autoAlpha: 0 },
+      tl.set("#cc{{ '%03d' % cue.idx }}", { autoAlpha: 0 },
         {{ cue.start + cue.dur }});
 {%- endfor %}
+{% endif %}
 
       /* ★★ SMIL 을 타임라인에 **묶는다.** 이것이 없으면 장면이 조용히 멈춘다.
        *
@@ -318,7 +530,7 @@
        * 으로 세운다 — `tools/shot_svg.mjs` 가 한 컷을 뽑을 때 쓰는 것과 같다.
        * 그래서 「거기서 보이면 렌더에서도 보인다」가 성립한다. */
       const smilSvgs = Array.prototype.slice.call(
-        document.querySelectorAll(".art.live > .cam > svg"));
+        document.querySelectorAll(".art.live > .cam > svg, .art.card .shot.k-svg > svg"));
       smilSvgs.forEach(function (s) {
         if (typeof s.pauseAnimations === "function") s.pauseAnimations();
       });
@@ -358,8 +570,29 @@
         }
       }
 
-      tl.eventCallback("onUpdate", function () { syncSmil(); gateClips(); });
+      /* ★ 영상 겹도 **같은 훅에** 태운다. `<video>` 도 SMIL 과 똑같이 제 시계로
+       *   흐르므로, 렌더러가 GSAP 을 seek 하면 엉뚱한 프레임이 찍힌다.
+       *   시계를 둘로 만들지 않으려고 새 훅을 만들지 않고 여기에 붙였다.
+       *   (진짜 `.gif` 파일을 받지 않는 이유가 이것이다 — 되감을 손잡이가 없다.
+       *    움직이는 그림은 PNG 시퀀스나 mp4 로 들어온다.) */
+      const vids = Array.prototype.slice.call(
+        document.querySelectorAll(".art.card video.fr"));
+      vids.forEach(function (v) { try { v.pause(); } catch (e) {} });
+      function syncVideo() {
+        const t = tl.time();
+        for (let i = 0; i < vids.length; i++) {
+          const v = vids[i];
+          const at = parseFloat(v.dataset.at || "0") || 0;
+          const want = Math.max(0, t - at);
+          if (isFinite(want) && Math.abs((v.currentTime || 0) - want) > 0.03) {
+            try { v.currentTime = want; } catch (e) { /* 아직 못 읽었다 */ }
+          }
+        }
+      }
+
+      tl.eventCallback("onUpdate", function () { syncSmil(); syncVideo(); gateClips(); });
       syncSmil();
+      syncVideo();
       gateClips();
 
       window.__timelines["main"] = tl;
